@@ -2,6 +2,8 @@
 #include <utility> //std::move
 #include "utils.hpp"
 
+namespace ASIOLibs {
+
 std::string bin2hex(const std::string &in) {
 	static const char table[] = "0123456789ABCDEF";
 	std::string out;
@@ -43,3 +45,5 @@ std::string hex2bin(const std::string &in) {
 
 	return std::move(out);
 }
+
+};

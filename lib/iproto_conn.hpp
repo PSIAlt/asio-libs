@@ -1,6 +1,6 @@
 #pragma once
-#ifndef _IPPROTO_CONN_HPP
-#define _IPPROTO_CONN_HPP
+#ifndef _ASIO_LIBS_IPPROTO_CONN_HPP
+#define _ASIO_LIBS_IPPROTO_CONN_HPP
 #include <cstdio>
 #include <memory>//uniqe_ptr
 #include <list>
@@ -41,7 +41,8 @@ struct Conn : public std::enable_shared_from_this<Conn> {
 	typedef std::function< void(RequestResult &&res) > callbacks_func_type;
 	typedef std::unordered_map< uint32_t, std::pair<boost::asio::deadline_timer *, callbacks_func_type> > callbacks_map_type;
 
-	Conn(boost::asio::io_service &_io, const boost::asio::ip::tcp::endpoint &_ep, uint32_t _connect_timeout=1000, uint32_t _read_timeout=0);
+	Conn(boost::asio::io_service &_io, const boost::asio::ip::tcp::endpoint &_ep,
+		uint32_t _connect_timeout=1000, uint32_t _read_timeout=0); //timeouts are in milliseconds
 	Conn(const Conn &) = delete;
 	Conn &operator=(const Conn &) = delete;
 	Conn(Conn &&) = delete;

@@ -1,6 +1,6 @@
 #pragma once
-#ifndef _IPPROTO_HPP
-#define _IPPROTO_HPP
+#ifndef _ASIO_LIBS_IPPROTO_HPP
+#define _ASIO_LIBS_IPPROTO_HPP
 #include <assert.h>
 #include <cstring>
 #include <atomic>

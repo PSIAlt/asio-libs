@@ -1,20 +1,20 @@
 #pragma once
-#ifndef _ASIO_GRAPHITE_HPP
-#define _ASIO_GRAPHITE_HPP
+#ifndef _ASIO_LIBS_GRAPHITE_HPP
+#define _ASIO_LIBS_GRAPHITE_HPP
 #include <string>
 #include <boost/asio/io_service.hpp>
 #include <boost/asio/ip/udp.hpp>
 #include <boost/noncopyable.hpp>
 
-namespace CPPTools {
+namespace ASIOLibs {
 
-class ASIO_Graphite :
+class Graphite :
 	public boost::noncopyable {
 public:
 	typedef long value_type;
 
-	ASIO_Graphite(boost::asio::io_service &_io, const boost::asio::ip::udp::endpoint &_ep, const char *prefix);
-	~ASIO_Graphite();
+	Graphite(boost::asio::io_service &_io, const boost::asio::ip::udp::endpoint &_ep, const char *prefix);
+	~Graphite();
 
 	bool writeStat(const char *name, value_type value=1);
 

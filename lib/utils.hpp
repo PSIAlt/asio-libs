@@ -1,11 +1,13 @@
 #pragma once
-#ifndef _UTILS_HPP_
-#define _UTILS_HPP_
+#ifndef _ASIO_LIBS_UTILS_HPP_
+#define _ASIO_LIBS_UTILS_HPP_
 #include <string>
 #include <functional>
 #include <sstream>
 #include <stdexcept>
 #include <utility> //forward
+
+namespace ASIOLibs {
 
 struct ScopeGuard {
 	typedef std::function< void() > func_type;
@@ -83,6 +85,8 @@ struct Optional {
 private:
 	T value;
 	bool has_value;
+};
+
 };
 
 #endif
