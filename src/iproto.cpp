@@ -83,6 +83,16 @@ void PackerSetValue< char * >::operator()(Packet &pkt, uint32_t flags, char * co
 	memcpy(pkt.data+pkt.hdr.len, val, sz);
 	pkt.hdr.len += sz;
 }
+template<> //instantiate for ByteBuffer
+void PackerSetValue<ByteBuffer>::operator()(Packet &pkt, uint32_t flags, const ByteBuffer &val) {
+	uint32_t sz = val.size;
+	if( (pkt.hdr.len+sz) > pkt.ofs ) {
+		pkt.ofs = pkt.ofs*2 + sz;
+		pkt.data = static_cast<char*>( realloc(pkt.data, pkt.ofs) );
+	}
+	memcpy(pkt.data+pkt.hdr.len, val.buf, sz);
+	pkt.hdr.len += sz;
+}
 
 //Unpacker
 template<typename T>
@@ -105,5 +115,12 @@ std::string UnpackerGetValue<std::string>::operator()(Packet &pkt, uint32_t flag
 	pkt.ofs += v_len;
 	return v;
 }
+template<> //instantiate for ByteBuffer
+ByteBuffer UnpackerGetValue<ByteBuffer>::operator()(Packet &pkt, uint32_t flags) {
+	uint32_t was_len = (pkt.ofs-sizeof(pkt.hdr)) - pkt.hdr.len;
+	pkt.ofs += was_len;
+	return ByteBuffer(pkt.data+pkt.ofs-was_len, was_len);
+}
+
 
 };

@@ -65,6 +65,11 @@ int main() {
 		assert( p6.data == nullptr ); i++;
 	}
 
+	uint32_t simplebuf = 0x1234;
+	auto p7 = Packer(123, 0, ByteBuffer( &simplebuf, sizeof(simplebuf)) );
+	auto u7 = Unpacker< ByteBuffer >(p7);
+	assert( memcmp(&simplebuf, get<0>(u7).buf, sizeof(simplebuf)) == 0 ); i++;
+
 	cerr << "IProto ok, " << i << " tests done" << endl;
 	return 0;
 }

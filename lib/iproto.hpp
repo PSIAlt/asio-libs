@@ -60,6 +60,15 @@ struct Packet {
 	uint32_t ofs;
 };
 
+struct ByteBuffer {
+	ByteBuffer(void *_buf, uint32_t _size) : buf(_buf), size(_size) {};
+	ByteBuffer(const ByteBuffer &other) = default;
+	ByteBuffer &operator=(const ByteBuffer &other) = default;
+
+	void *buf;
+	uint32_t size;
+};
+
 struct tuple_missmatch : public std::runtime_error {
 	tuple_missmatch(const std::string &err) : runtime_error(err) {};
 };
