@@ -51,7 +51,7 @@ struct Packet {
 		memcpy(&hdr, data, sizeof(hdr));
 	}
 	uint32_t BytesLeft() const {
-		return (sizeof(hdr)+hdr.len) - ofs;
+		return hdr.len - ofs;
 	}
 	std::string Dump() const;
 

@@ -117,7 +117,7 @@ std::string UnpackerGetValue<std::string>::operator()(Packet &pkt, uint32_t flag
 }
 template<> //instantiate for ByteBuffer
 ByteBuffer UnpackerGetValue<ByteBuffer>::operator()(Packet &pkt, uint32_t flags) {
-	uint32_t was_len = (pkt.ofs-sizeof(pkt.hdr)) - pkt.hdr.len;
+	uint32_t was_len = pkt.hdr.len - pkt.ofs;
 	pkt.ofs += was_len;
 	return ByteBuffer(pkt.data+pkt.ofs-was_len, was_len);
 }
