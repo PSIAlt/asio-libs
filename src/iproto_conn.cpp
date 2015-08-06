@@ -53,6 +53,11 @@ void Conn::beginConnect() {
 	if( LOG_DEBUG )
 		log_func("[iproto_conn] Connecting to %s:%d", ep.address().to_string().c_str(), ep.port() );
 }
+void Conn::reconnect() {
+	if( sock.is_open() )
+		sock.close();
+	beginConnect();
+}
 void Conn::dismissCallbacks(CB_Result res) {
 	if( LOG_DEBUG )
 		log_func("[iproto_conn] dismissCallbacks");
@@ -62,10 +67,8 @@ void Conn::dismissCallbacks(CB_Result res) {
 	callbacks_map.clear();
 }
 void Conn::reconnectByTimer(const boost::system::error_code& error) {
-	if( !error ) {
-		if( sock.is_open() ) sock.close();
-		beginConnect();
-	}
+	if( !error )
+		reconnect();
 }
 void Conn::onConnect(const boost::system::error_code& error) {
 	if( !error ) {
