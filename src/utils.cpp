@@ -46,20 +46,26 @@ std::string hex2bin(const std::string &in) {
 }
 
 std::string string_sprintf(const char *fmt, ...) {
-	size_t sz = 16;
-	std::string ret;
-	va_list args;
+	size_t sz = 128;
+	std::string ret(sz, 0);
+	va_list args, args_copy;
 	va_start(args, fmt);
-	int r = -1;
-	while( r == -1 ) {
+	while( 1 ) {
 		sz *= 2;
-		if( sz > 4096 )
+		if( sz > 4096 ) {
+			va_end(args);
 			throw std::overflow_error("string_sprintf: Too long output");
+		}
 		ret.resize(sz);
-		r = vsnprintf(&ret[0], ret.size(), fmt, args);
+		va_copy(args_copy, args);
+		int r = vsnprintf(&ret[0], ret.size(), fmt, args_copy);
+		va_end(args_copy);
+		if( r>=0 && r<ret.size() ) {
+			ret.resize( r );
+			break;
+		}
 	}
 	va_end (args);
-	ret.resize( r );
 	return ret;
 }
 

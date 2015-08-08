@@ -24,6 +24,7 @@ struct Response {
 	boost::asio::streambuf read_buf;
 	ssize_t ContentLength;
 	int status;
+	std::string Dump() const;
 };
 
 struct Conn {
@@ -54,7 +55,6 @@ private:
 	void headersCacheCheck();
 
 	boost::asio::yield_context &yield;
-	boost::asio::io_service &io;
 	boost::asio::ip::tcp::endpoint ep;
 	boost::asio::ip::tcp::socket sock;
 	boost::asio::deadline_timer timer;

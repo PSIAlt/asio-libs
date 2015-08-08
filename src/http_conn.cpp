@@ -1,7 +1,10 @@
+#include <iostream>
 #include <boost/asio.hpp>
 #include <boost/bind.hpp>
 #include "utils.hpp"
 #include "http_conn.hpp"
+
+#define DEBUG(x) std::cerr << x << std::endl;
 
 namespace ASIOLibs {
 namespace HTTP {
@@ -18,7 +21,7 @@ enum {
 
 Conn::Conn(boost::asio::yield_context &_yield, boost::asio::io_service &_io,
 		boost::asio::ip::tcp::endpoint &_ep, long _conn_timeout, long _read_timeout)
-		: yield(_yield), io(_io), ep(_ep), sock(_io), timer(_io), conn_timeout(_conn_timeout),
+		: yield(_yield), ep(_ep), sock(_io), timer(_io), conn_timeout(_conn_timeout),
 			read_timeout(_read_timeout), is_timeout(false), headers_cache_clear(true) {
 	headers["User-Agent"] = "ASIOLibs " ASIOLIBS_VERSION;
 	headers["Connection"] = "Keep-Alive";
@@ -77,6 +80,7 @@ std::unique_ptr< Response > Conn::GET(const std::string &uri) {
 void Conn::writeRequest(const char *buf, size_t sz, bool wait_read) {
 	int try_count = 0;
 	boost::system::error_code error_code;
+	DEBUG( "writeRequest " << std::string(buf, sz) );
 	while( try_count++ < max_send_try ) {
 		checkConnect();
 		boost::asio::async_write(sock, boost::asio::buffer(buf, sz), yield[error_code]);
@@ -85,6 +89,8 @@ void Conn::writeRequest(const char *buf, size_t sz, bool wait_read) {
 				setupTimeout( read_timeout );
 				boost::asio::async_read(sock, boost::asio::null_buffers(), yield[error_code]);
 				checkTimeout();
+				if( error_code == boost::asio::error::operation_aborted )
+					throw boost::system::system_error(error_code);
 			}
 			if( !error_code )
 				return;
@@ -92,10 +98,11 @@ void Conn::writeRequest(const char *buf, size_t sz, bool wait_read) {
 		if( sock.is_open() ) //Dunno wtf happend, just reconnect
 			reconnect();
 	}
-	throw boost::system::system_error(error_code, "Cannot write to socket");
+	throw boost::system::system_error(error_code);
 }
 
 std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
+	DEBUG( "ReadAnswer" );
 	static const char hdr_end_pattern[] = "\r\n\r\n";
 	static const char hdr_status_end_pattern[] = "\r\n";
 	std::unique_ptr< Response > ret( new Response() );
@@ -123,6 +130,12 @@ std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
 		throw std::runtime_error("Cant parse http status");
 
 	return ret;
+}
+
+std::string Response::Dump() const {
+	ASIOLibs::StrFormatter s;
+	s << "HTTP status=" << status << "; ContentLength=" << ContentLength << "\n";
+	return s.str();
 }
 
 };};
