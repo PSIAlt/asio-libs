@@ -1,5 +1,4 @@
 #include <stdexcept>
-#include <utility> //std::move
 #include "utils.hpp"
 
 namespace ASIOLibs {
@@ -16,7 +15,7 @@ std::string bin2hex(const std::string &in) {
 		out[o++] = table[ *(it++)  & 0xf ];
 	}
 
-	return std::move(out);
+	return out;
 }
 
 std::string hex2bin(const std::string &in) {
@@ -43,7 +42,25 @@ std::string hex2bin(const std::string &in) {
 		s = (s == 4 ? 0 : 4);
 	}
 
-	return std::move(out);
+	return out;
+}
+
+std::string string_sprintf(const char *fmt, ...) {
+	size_t sz = 16;
+	std::string ret;
+	va_list args;
+	va_start(args, fmt);
+	int r = -1;
+	while( r == -1 ) {
+		sz *= 2;
+		if( sz > 4096 )
+			throw std::overflow_error("string_sprintf: Too long output");
+		ret.resize(sz);
+		r = vsnprintf(&ret[0], ret.size(), fmt, args);
+	}
+	va_end (args);
+	ret.resize( r );
+	return ret;
 }
 
 };

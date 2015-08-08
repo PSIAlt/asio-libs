@@ -20,7 +20,7 @@ endif
 
 CC = $(CXX)
 CXXFLAGS = -std=c++11 -Wall -I /usr/include/ -I /usr/local/include/ -I $(LIBDIR) -O2 -I /usr/local/lib/gcc47/include/ -ggdb3
-LDFLAGS = -L /usr/local/lib/ -L /usr/lib/ -lboost_system -lboost_thread-mt
+LDFLAGS = -L /usr/local/lib/ -L /usr/lib/ -lboost_system -lboost_thread-mt -lboost_coroutine-mt
 SRCST = $(wildcard $(SRCDIR)*.cpp)
 SRCS = $(SRCST:$(SRCDIR)%=%)
 OBJS = $(SRCS:.cpp=.o)

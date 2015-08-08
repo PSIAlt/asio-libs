@@ -9,6 +9,8 @@
 
 namespace ASIOLibs {
 
+#define ASIOLIBS_VERSION "1.0"
+
 struct ScopeGuard {
 	typedef std::function< void() > func_type;
 	explicit ScopeGuard(func_type _func) : func(_func), isReleased(false) {}
@@ -86,6 +88,8 @@ private:
 	T value;
 	bool has_value;
 };
+
+std::string string_sprintf(const char *fmt, ...);
 
 };
 
