@@ -17,19 +17,31 @@
 namespace ASIOLibs {
 namespace HTTP {
 
-// Asyncronous HTTP client with stream post and get support
+/*
+	Asyncronous HTTP client
+- POST/GET methods support
+- headers support
+- keep-alive support
+- auto-rectonnection on keep-alive drop
+- streaming POST support
+- streaming GET support
+*/
 
 struct Timeout : public std::runtime_error {
 	Timeout(const std::string &s) : std::runtime_error(s) {}; 
 };
 
+struct Conn;
 struct Response {
-	boost::asio::streambuf read_buf;
 	ssize_t ContentLength, ReadLeft;
 	int status;
 	std::map< std::string, std::string > headers;
 	std::string Dump() const;
-	std::string drainRead();
+	std::string drainRead() const;
+
+private:
+	friend struct Conn;
+	mutable boost::asio::streambuf read_buf;
 };
 
 struct Conn {
@@ -41,6 +53,8 @@ struct Conn {
 	void close();
 
 	std::unique_ptr< Response > DoSimpleRequest(const char *cmd, const std::string &uri, bool full_body_read);
+	// Do a request with post data drained from callback getDataCallback. getDataCallback should return true when done.
+	//Proxying finishes when *buf is NULL. can_recall indicates getDataCallback can be callaed again to get data one more time.
 	std::unique_ptr< Response > DoPostRequest(const char *cmd, const std::string &uri, size_t ContentLength,
 		std::function< bool(const char **buf, size_t *len) > getDataCallback, bool can_recall=false);
 
@@ -61,6 +75,11 @@ struct Conn {
 	}
 
 	long getConnCount() const { return conn_count; }
+
+	//Stream data from socket by chunks. Callback should return true when no need more data
+	void StreamReadData( std::unique_ptr< Response > &resp, std::function< bool(const char *buf, size_t len) > dataCallback );
+	//Proxy(splice) data to another socket
+	void StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip::tcp::socket &dest );
 
 private:
 	void setupTimeout(long milliseconds);

@@ -11,7 +11,7 @@ boost::asio::io_service io;
 boost::asio::yield_context *yield;
 boost::asio::ip::tcp::endpoint ep;
 
-TEST_CASE( "HTTP GET tests", "[main]" ) {
+TEST_CASE( "HTTP GET tests", "[get]" ) {
 	ASIOLibs::HTTP::Conn c( *yield, io, ep );
 	c.Headers()["Host"] = "forsakens.ru";
 	auto r0 = c.GET("/");
@@ -34,7 +34,7 @@ TEST_CASE( "HTTP GET tests", "[main]" ) {
 	REQUIRE( r4->status == 200 );
 	REQUIRE( c.getConnCount() == 2 );
 }
-TEST_CASE( "HTTP HEAD tests", "[main]" ) {
+TEST_CASE( "HTTP HEAD tests", "[head]" ) {
 	ASIOLibs::HTTP::Conn c( *yield, io, ep );
 	c.Headers()["Host"] = "forsakens.ru";
 	auto r0 = c.HEAD("/");
@@ -53,6 +53,52 @@ TEST_CASE( "HTTP HEAD tests", "[main]" ) {
 	REQUIRE( r3->status == 200 );
 	REQUIRE( r3->ContentLength == 123048 );
 	REQUIRE( c.getConnCount() == 2 ); //Keepalive drop after code 400
+}
+TEST_CASE( "HTTP GET stream tests", "[get]" ) {
+	ASIOLibs::HTTP::Conn c( *yield, io, ep );
+	c.Headers()["Host"] = "forsakens.ru";
+	auto r0 = c.GET("/Pg-hstore-1.01.tar.gz", false);
+	REQUIRE( r0->status == 200 );
+	REQUIRE( r0->ContentLength == 123048 );
+	REQUIRE( c.getConnCount() == 1 );
+	size_t cb_read=0;
+	std::string cb_read_str;
+	c.StreamReadData(r0, [&cb_read_str, &cb_read](const char *buf, size_t len) -> bool {
+		cb_read += len;
+		cb_read_str += std::string(buf, len);
+		return false;
+	});
+	REQUIRE( cb_read == 123048 );
+	auto r1 = c.GET("/Pg-hstore-1.01.tar.gz");
+	REQUIRE( r1->status == 200 );
+	REQUIRE( r1->ContentLength == 123048 );
+	REQUIRE( c.getConnCount() == 1 );
+	std::string drain_read_str = r1->drainRead();
+	REQUIRE( cb_read_str == drain_read_str );
+}
+TEST_CASE( "HTTP GET timeouts tests", "[get]" ) {
+	{
+		ASIOLibs::HTTP::Conn c( *yield, io, ep, 1, 1 ); //Should be connect timeout
+		c.Headers()["Host"] = "forsakens.ru";
+		bool was_timeout = false;
+		try {
+			auto r0 = c.GET("/Pg-hstore-1.01.tar.gz");
+		}catch(ASIOLibs::HTTP::Timeout &e) {
+			was_timeout = true;
+		}
+		REQUIRE( was_timeout == true );
+	}
+	{
+		ASIOLibs::HTTP::Conn c( *yield, io, ep, 1000, 1 ); //Should be read timeout
+		c.Headers()["Host"] = "forsakens.ru";
+		bool was_timeout = false;
+		try {
+			auto r0 = c.GET("/Pg-hstore-1.01.tar.gz");
+		}catch(ASIOLibs::HTTP::Timeout &e) {
+			was_timeout = true;
+		}
+		REQUIRE( was_timeout == true );
+	}
 }
 
 int result=0;

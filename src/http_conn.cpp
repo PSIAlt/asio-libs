@@ -1,6 +1,7 @@
 #include <iostream>
 #include <boost/asio.hpp>
 #include <boost/bind.hpp>
+#include <fcntl.h>
 #include "utils.hpp"
 #include "http_conn.hpp"
 
@@ -14,6 +15,18 @@ extern "C" {
 #include "picohttpparser.inc"
 };
 #pragma GCC visibility pop
+
+#define TIMEOUT_START(x) \
+	boost::system::error_code error_code; \
+	setupTimeout( x );
+
+#define TIMEOUT_END() \
+		if( error_code ) { \
+			if( error_code != boost::asio::error::operation_aborted ) \
+				throw boost::system::system_error(error_code); \
+			is_timeout=true; \
+		} \
+		checkTimeout();
 
 enum {
 	max_send_try = 5
@@ -29,16 +42,16 @@ Conn::Conn(boost::asio::yield_context &_yield, boost::asio::io_service &_io,
 
 void Conn::checkConnect() {
 	if( !sock.is_open() || must_reconnect ) {
-		if( sock.is_open() ) sock.close();
-		setupTimeout( conn_timeout );
-		sock.async_connect(ep, yield);
-		checkTimeout();
+		close();
+		TIMEOUT_START( conn_timeout );
+		sock.async_connect(ep, yield[error_code]);
+		TIMEOUT_END();
 		conn_count++;
 		must_reconnect=false;
 	}
 }
 void Conn::reconnect() {
-	if( sock.is_open() ) sock.close();
+	close();
 	checkConnect();
 }
 void Conn::close() {
@@ -51,14 +64,16 @@ void Conn::setupTimeout(long milliseconds) {
 }
 void Conn::onTimeout(const boost::system::error_code &ec) {
 	if( !ec && timer.expires_from_now() <= boost::posix_time::seconds(0) ) {
-		if( sock.is_open() ) sock.close();
+		close();
 		is_timeout=true;
 	}
 }
 void Conn::checkTimeout() {
 	timer.cancel();
-	if( is_timeout )
+	if( is_timeout ) {
+		close();
 		throw Timeout( "ASIOLibs::HTTP::Conn: Timeout while requesting " + ep.address().to_string() );
+	}
 }
 
 void Conn::headersCacheCheck() {
@@ -87,7 +102,7 @@ std::unique_ptr< Response > Conn::GET(const std::string &uri, bool full_body_rea
 }
 std::unique_ptr< Response > Conn::HEAD(const std::string &uri) {
 	auto ret = DoSimpleRequest("HEAD", uri, false);
-	ret->ReadLeft = 0;
+	ret->ReadLeft = 0; //Body wont follow
 	return ret;
 }
 std::unique_ptr< Response > Conn::MOVE(const std::string &uri_from, const std::string &uri_to, bool allow_overwrite) {
@@ -151,9 +166,7 @@ void Conn::writeRequest(const char *buf, size_t sz, bool wait_read) {
 			if( wait_read ) {
 				setupTimeout( read_timeout );
 				boost::asio::async_read(sock, boost::asio::null_buffers(), yield[error_code]);
-				checkTimeout();
-				if( error_code == boost::asio::error::operation_aborted )
-					throw boost::system::system_error(error_code);
+				TIMEOUT_END();
 			}
 			if( !error_code )
 				return;
@@ -170,9 +183,9 @@ std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
 	ret->ContentLength = -1;
 	ret->ReadLeft = 0;
 
-	setupTimeout( read_timeout );
-	boost::asio::async_read_until(sock, ret->read_buf, std::string(hdr_end_pattern), yield);
-	checkTimeout();
+	TIMEOUT_START( read_timeout );
+	boost::asio::async_read_until(sock, ret->read_buf, std::string(hdr_end_pattern), yield[error_code]);
+	TIMEOUT_END();
 
 	const char *data = boost::asio::buffer_cast<const char *>( ret->read_buf.data() );
 	size_t sz = ret->read_buf.size();
@@ -209,12 +222,59 @@ std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
 		ret->ReadLeft = ret->ContentLength - ret->read_buf.size();
 	if( read_body && ret->ContentLength>0 ) {
 		while( ret->ReadLeft > 0 ) {
-			size_t rd = boost::asio::async_read(sock, ret->read_buf, boost::asio::transfer_at_least(ret->ReadLeft), yield);
+			TIMEOUT_START( read_timeout );
+			size_t rd = boost::asio::async_read(sock, ret->read_buf,
+				boost::asio::transfer_exactly(ret->ReadLeft>4096 ? 4096 : ret->ReadLeft), yield[error_code]);
+			TIMEOUT_END();
 			ret->ReadLeft -= rd;
 		}
 	}
 
 	return ret;
+}
+
+void Conn::StreamReadData( std::unique_ptr< Response > &resp, std::function< bool(const char *buf, size_t len) > dataCallback ) {
+	bool interrupt = false, disable_callback=false;
+	const char *buf;
+	size_t len;
+	while( !interrupt ) {
+		len = resp->read_buf.size();
+		if( len>0 ) {
+			buf = boost::asio::buffer_cast<const char *>( resp->read_buf.data() );
+			if( ! disable_callback )
+				disable_callback = dataCallback(buf, len);
+			resp->read_buf.consume(len);
+		}
+		if( resp->ReadLeft > 0 ) {
+			while( resp->ReadLeft > 0 ) {
+				TIMEOUT_START( read_timeout );
+				size_t rd = boost::asio::async_read(sock, resp->read_buf,
+					boost::asio::transfer_exactly(resp->ReadLeft>4096 ? 4096 : resp->ReadLeft), yield[error_code]);
+				TIMEOUT_END();
+				resp->ReadLeft -= rd;
+			}
+		}else{
+			interrupt = true;
+		}
+	}
+}
+
+void Conn::StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip::tcp::socket &dest ) {
+#ifndef SPLICE_F_MOVE
+	assert( "Cant call ASIOLibs::HTTP::Conn::StreamSpliceData: splice(2) is linux-only call" );
+	abort();
+#else
+	if( resp->read_buf.size() )
+		boost::asio::async_write(dest, resp->read_buf, yield);
+	while( resp->ReadLeft > 0 ) {
+		TIMEOUT_START( read_timeout );
+		boost::asio::async_read(sock, boost::asio::null_buffers(), yield[error_code]); //Have somthing to read
+		TIMEOUT_END();
+		boost::asio::async_write(dest, boost::asio::null_buffers(), yield); //Can write
+		size_t rd = splice( sock.native_handle(), NULL, dest.native_handle(), NULL, resp->ReadLeft, SPLICE_F_MOVE | SPLICE_F_NONBLOCK | SPLICE_F_MORE);
+		resp->ReadLeft -= rd;
+	}
+#endif
 }
 
 std::string Response::Dump() const {
@@ -225,7 +285,7 @@ std::string Response::Dump() const {
 	}
 	return s.str();
 }
-std::string Response::drainRead() {
+std::string Response::drainRead() const {
 	const char *data = boost::asio::buffer_cast<const char *>( read_buf.data() );
 	size_t sz = read_buf.size();
 	std::string ret(data, sz);
