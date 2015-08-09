@@ -75,18 +75,20 @@ void Conn::headersCacheCheck() {
 	}
 }
 
-std::unique_ptr< Response > Conn::DoSimpleRequest(const char *cmd, const std::string &uri) {
+std::unique_ptr< Response > Conn::DoSimpleRequest(const char *cmd, const std::string &uri, bool full_body_read) {
 	headersCacheCheck();
 	std::string req = ASIOLibs::string_sprintf("%s %s HTTP/1.1\n%s", cmd, uri.c_str(), headers_cache.c_str());
 	writeRequest( req.data(), req.size(), true );
-	return ReadAnswer(true);
+	return ReadAnswer(full_body_read);
 }
 
-std::unique_ptr< Response > Conn::GET(const std::string &uri) {
-	return DoSimpleRequest("GET", uri);
+std::unique_ptr< Response > Conn::GET(const std::string &uri, bool full_body_read) {
+	return DoSimpleRequest("GET", uri, full_body_read);
 }
 std::unique_ptr< Response > Conn::HEAD(const std::string &uri) {
-	return DoSimpleRequest("HEAD", uri);
+	auto ret = DoSimpleRequest("HEAD", uri, false);
+	ret->ReadLeft = 0;
+	return ret;
 }
 std::unique_ptr< Response > Conn::MOVE(const std::string &uri_from, const std::string &uri_to, bool allow_overwrite) {
 	headersCacheCheck();
@@ -166,6 +168,7 @@ std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
 	static const char hdr_end_pattern[] = "\r\n\r\n";
 	std::unique_ptr< Response > ret( new Response() );
 	ret->ContentLength = -1;
+	ret->ReadLeft = 0;
 
 	setupTimeout( read_timeout );
 	boost::asio::async_read_until(sock, ret->read_buf, std::string(hdr_end_pattern), yield);
@@ -187,11 +190,10 @@ std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
 	int pret = phr_parse_response(data, hdr_end-data+sizeof(hdr_end_pattern)-1, &minor_version, &ret->status, &msg, &msg_len, headers, &num_headers, 0);
 
 	if( pret != -2 && pret <= 0 )
-		throw std::runtime_error("Cant parse http response");
+		throw std::runtime_error("Cant parse http response: " + std::to_string(pret));
 
 	bool l_must_reconnect = true;
 	for(int i=0; i < num_headers; i++) {
-		//mllog::debug("Response header '%.*s' = '%.*s'", headers[i].name_len, headers[i].name, headers[i].value_len, headers[i].value);
 		if( !strncmp(headers[i].name, "Content-Length", headers[i].name_len) ) {
 			ret->ContentLength = strtol(headers[i].value, NULL, 0);
 		}else if( !strncmp(headers[i].name, "Connection", headers[i].name_len) && !strncasecmp(headers[i].value, "Keep-Alive", headers[i].value_len) ) {
@@ -201,13 +203,34 @@ std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
 	}
 	must_reconnect = must_reconnect || l_must_reconnect;
 
+	ret->read_buf.consume( hdr_end - data + sizeof(hdr_end_pattern)-1 ); //Remove headers from input stream
+
+	if( ret->ContentLength>=0 )
+		ret->ReadLeft = ret->ContentLength - ret->read_buf.size();
+	if( read_body && ret->ContentLength>0 ) {
+		while( ret->ReadLeft > 0 ) {
+			size_t rd = boost::asio::async_read(sock, ret->read_buf, boost::asio::transfer_at_least(ret->ReadLeft), yield);
+			ret->ReadLeft -= rd;
+		}
+	}
+
 	return ret;
 }
 
 std::string Response::Dump() const {
 	ASIOLibs::StrFormatter s;
-	s << "HTTP status=" << status << "; ContentLength=" << ContentLength << "\n";
+	s << "HTTP status=" << status << "; ContentLength=" << ContentLength << "; ReadLeft=" << ReadLeft << " Headers:\n";
+	for( auto &i : headers ) {
+		s << "'" << i.first << "': '" << i.second << "'\n";
+	}
 	return s.str();
+}
+std::string Response::drainRead() {
+	const char *data = boost::asio::buffer_cast<const char *>( read_buf.data() );
+	size_t sz = read_buf.size();
+	std::string ret(data, sz);
+	read_buf.consume(sz);
+	return ret;
 }
 
 };};

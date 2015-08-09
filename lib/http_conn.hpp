@@ -17,16 +17,19 @@
 namespace ASIOLibs {
 namespace HTTP {
 
+// Asyncronous HTTP client with stream post and get support
+
 struct Timeout : public std::runtime_error {
 	Timeout(const std::string &s) : std::runtime_error(s) {}; 
 };
 
 struct Response {
 	boost::asio::streambuf read_buf;
-	ssize_t ContentLength;
+	ssize_t ContentLength, ReadLeft;
 	int status;
 	std::map< std::string, std::string > headers;
 	std::string Dump() const;
+	std::string drainRead();
 };
 
 struct Conn {
@@ -37,11 +40,11 @@ struct Conn {
 	void reconnect();
 	void close();
 
-	std::unique_ptr< Response > DoSimpleRequest(const char *cmd, const std::string &uri);
+	std::unique_ptr< Response > DoSimpleRequest(const char *cmd, const std::string &uri, bool full_body_read);
 	std::unique_ptr< Response > DoPostRequest(const char *cmd, const std::string &uri, size_t ContentLength,
 		std::function< bool(const char **buf, size_t *len) > getDataCallback, bool can_recall=false);
 
-	std::unique_ptr< Response > GET(const std::string &uri);
+	std::unique_ptr< Response > GET(const std::string &uri, bool full_body_read = true);
 	std::unique_ptr< Response > HEAD(const std::string &uri);
 	std::unique_ptr< Response > MOVE(const std::string &uri_from, const std::string &uri_to, bool allow_overwrite = true);
 
