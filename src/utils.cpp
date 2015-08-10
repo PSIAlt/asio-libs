@@ -1,4 +1,5 @@
 #include <stdexcept>
+#include <cstdarg>
 #include "utils.hpp"
 
 namespace ASIOLibs {
@@ -10,7 +11,7 @@ std::string bin2hex(const std::string &in) {
 
 	int o=0;
 	auto it = in.begin();
-	for(int l=0; l<in.size(); l++) {
+	for(size_t l=0; l<in.size(); l++) {
 		out[o++] = table[ (*it>>4) & 0xf ];
 		out[o++] = table[ *(it++)  & 0xf ];
 	}
@@ -27,7 +28,7 @@ std::string hex2bin(const std::string &in) {
 	out.resize( in.size()/2 );
 
 	unsigned s=4;
-	for(int i=0, l=0; i<in.size(); i++) {
+	for(size_t i=0, l=0; i<in.size(); i++) {
 		char c = in[i];
 		if     ( c >= '0' && c <= '9' )
 			out[l] |= (c-'0') << s;
@@ -60,7 +61,7 @@ std::string string_sprintf(const char *fmt, ...) {
 		va_copy(args_copy, args);
 		int r = vsnprintf(&ret[0], ret.size(), fmt, args_copy);
 		va_end(args_copy);
-		if( r>=0 && r<ret.size() ) {
+		if( r>=0 && static_cast<unsigned>(r)<ret.size() ) {
 			ret.resize( r );
 			break;
 		}

@@ -207,7 +207,7 @@ std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
 		throw std::runtime_error("Cant parse http response: " + std::to_string(pret));
 
 	bool l_must_reconnect = true;
-	for(int i=0; i < num_headers; i++) {
+	for(size_t i=0; i < num_headers; i++) {
 		if( !strncmp(headers[i].name, "Content-Length", headers[i].name_len) ) {
 			ret->ContentLength = strtol(headers[i].value, NULL, 0);
 		}else if( !strncmp(headers[i].name, "Connection", headers[i].name_len) && !strncasecmp(headers[i].value, "Keep-Alive", headers[i].value_len) ) {
@@ -220,7 +220,7 @@ std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
 	ret->read_buf.consume( hdr_end - data + sizeof(hdr_end_pattern)-1 ); //Remove headers from input stream
 
 	if( ret->ContentLength>=0 ) {
-		assert( ret->ContentLength >= ret->read_buf.size() );
+		assert( static_cast<size_t>(ret->ContentLength) >= ret->read_buf.size() );
 		ret->ReadLeft = ret->ContentLength - ret->read_buf.size();
 	}
 	if( read_body && ret->ContentLength>0 ) {
