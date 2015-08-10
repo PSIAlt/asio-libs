@@ -85,8 +85,8 @@ struct Conn {
 
 	//Preload some number of bytes into resp. Useful when you want to read start of the response and then splice() or whatever. 0 for drain all
 	void PrelaodBytes( std::unique_ptr< Response > &resp, size_t count );
-	//Stream data from socket by chunks. Callback should return true when no need more data(rest of content will be dropped unless disable_drain set).
-	void StreamReadData( std::unique_ptr< Response > &resp, std::function< bool(const char *buf, size_t len) > dataCallback, bool disable_drain=false );
+	//Stream data from socket by chunks. Callback should return 0 when no need more data(rest of content will be dropped unless disable_drain set).
+	void StreamReadData( std::unique_ptr< Response > &resp, std::function< size_t(const char *buf, size_t len) > dataCallback, bool disable_drain=false );
 	//Proxy(splice) data to another socket
 	void StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip::tcp::socket &dest );
 

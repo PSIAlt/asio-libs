@@ -69,10 +69,10 @@ TEST_CASE( "HTTP GET stream tests", "[get]" ) {
 	REQUIRE( c.getConnCount() == 1 );
 	size_t cb_read=0;
 	std::string cb_read_str;
-	c.StreamReadData(r0, [&cb_read_str, &cb_read](const char *buf, size_t len) -> bool {
+	c.StreamReadData(r0, [&cb_read_str, &cb_read](const char *buf, size_t len) -> size_t {
 		cb_read += len;
 		cb_read_str += std::string(buf, len);
-		return false;
+		return len;
 	});
 	REQUIRE( cb_read == 123048 );
 
@@ -93,17 +93,19 @@ TEST_CASE( "HTTP GET stream tests", "[get]" ) {
 	REQUIRE( c.getConnCount() == 1 );
 	size_t r2_cb_read=0;
 	std::string r2_cb_read_str;
-	c.StreamReadData(r2, [&r2_cb_read_str, &r2_cb_read](const char *buf, size_t len) -> bool {
+	c.StreamReadData(r2, [&r2_cb_read_str, &r2_cb_read](const char *buf, size_t len) -> size_t {
+		if( r2_cb_read>0 )
+			return 0; /* "gimme back control flow" */
 		r2_cb_read += len;
 		r2_cb_read_str += std::string(buf, len);
-		return true;/* "gimme back control flow" */
+		return len;
 	}, true/*disable full content drain*/);
 	REQUIRE( r2_cb_read > 0 );
 	REQUIRE( r2_cb_read < 123048 ); //This is faulty assertion (depends on how nginx will answer)
-	c.StreamReadData(r2, [&r2_cb_read_str, &r2_cb_read](const char *buf, size_t len) -> bool { //Continue read
+	c.StreamReadData(r2, [&r2_cb_read_str, &r2_cb_read](const char *buf, size_t len) -> size_t { //Continue read
 		r2_cb_read += len;
 		r2_cb_read_str += std::string(buf, len);
-		return false;/*continue until end*/
+		return len;/*continue until end*/
 	});
 	REQUIRE( r2_cb_read == 123048 );
 	REQUIRE( r2_cb_read_str == drain_read_str );

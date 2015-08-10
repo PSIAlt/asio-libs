@@ -10,11 +10,9 @@
 namespace ASIOLibs {
 namespace HTTP {
 
-#pragma GCC visibility push(hidden)
 extern "C" {
 #include "picohttpparser.inc"
 };
-#pragma GCC visibility pop
 
 #define TIMEOUT_START(x) \
 	boost::system::error_code error_code; \
@@ -250,7 +248,7 @@ void Conn::PrelaodBytes( std::unique_ptr< Response > &resp, size_t count ) {
 	resp->ReadLeft -= rd;
 }
 
-void Conn::StreamReadData( std::unique_ptr< Response > &resp, std::function< bool(const char *buf, size_t len) > dataCallback, bool disable_drain ) {
+void Conn::StreamReadData( std::unique_ptr< Response > &resp, std::function< size_t(const char *buf, size_t len) > dataCallback, bool disable_drain ) {
 	bool interrupt = false, disable_callback=false;
 	const char *buf;
 	size_t len;
@@ -258,9 +256,12 @@ void Conn::StreamReadData( std::unique_ptr< Response > &resp, std::function< boo
 		len = resp->read_buf.size();
 		if( len>0 ) {
 			buf = boost::asio::buffer_cast<const char *>( resp->read_buf.data() );
-			if( ! disable_callback )
-				disable_callback = dataCallback(buf, len);
-			resp->read_buf.consume(len);
+			size_t consume_len = len;
+			if( ! disable_callback ) {
+				consume_len = dataCallback(buf, len);
+				if( consume_len==0 ) disable_callback=true;
+			}
+			resp->read_buf.consume(consume_len);
 		}
 		if( disable_callback && disable_drain )
 			return; //Leave socket unread
@@ -280,7 +281,7 @@ void Conn::StreamReadData( std::unique_ptr< Response > &resp, std::function< boo
 
 void Conn::StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip::tcp::socket &dest ) {
 #ifndef SPLICE_F_MOVE
-	assert( "Cant call ASIOLibs::HTTP::Conn::StreamSpliceData: splice(2) is linux-only call" );
+	assert( !"Cant call ASIOLibs::HTTP::Conn::StreamSpliceData: splice(2) is linux-only call" );
 	abort();
 #else
 	if( resp->read_buf.size() )
