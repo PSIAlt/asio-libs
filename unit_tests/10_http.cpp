@@ -41,22 +41,28 @@ TEST_CASE( "HTTP HEAD tests", "[head]" ) {
 	REQUIRE( r0->status == 200 );
 	REQUIRE( r0->ContentLength > 0 );
 	REQUIRE( c.getConnCount() == 1 );
+	c.close();
 	auto r1 = c.HEAD("/test/503");
 	REQUIRE( r1->status == 503 );
 	REQUIRE( r1->ContentLength > 0 );
-	REQUIRE( c.getConnCount() == 1 );
+	REQUIRE( c.getConnCount() == 2 );
+	c.close();
 	auto r2 = c.HEAD("/test/400");
 	REQUIRE( r2->status == 400 );
 	REQUIRE( r2->ContentLength > 0 );
-	REQUIRE( c.getConnCount() == 1 );
+	REQUIRE( c.getConnCount() == 3 );
+	c.close();
 	auto r3 = c.HEAD("/Pg-hstore-1.01.tar.gz");
 	REQUIRE( r3->status == 200 );
 	REQUIRE( r3->ContentLength == 123048 );
-	REQUIRE( c.getConnCount() == 2 ); //Keepalive drop after code 400
+	REQUIRE( c.getConnCount() == 4 );
+	c.close();
 }
 TEST_CASE( "HTTP GET stream tests", "[get]" ) {
 	ASIOLibs::HTTP::Conn c( *yield, io, ep );
 	c.Headers()["Host"] = "forsakens.ru";
+
+	//Request streaming
 	auto r0 = c.GET("/Pg-hstore-1.01.tar.gz", false);
 	REQUIRE( r0->status == 200 );
 	REQUIRE( r0->ContentLength == 123048 );
@@ -69,16 +75,63 @@ TEST_CASE( "HTTP GET stream tests", "[get]" ) {
 		return false;
 	});
 	REQUIRE( cb_read == 123048 );
+
+	//Request normal
 	auto r1 = c.GET("/Pg-hstore-1.01.tar.gz");
 	REQUIRE( r1->status == 200 );
 	REQUIRE( r1->ContentLength == 123048 );
 	REQUIRE( c.getConnCount() == 1 );
 	std::string drain_read_str = r1->drainRead();
+
+	//Compare output
 	REQUIRE( cb_read_str == drain_read_str );
+
+	//Check partial drain
+	auto r2 = c.GET("/Pg-hstore-1.01.tar.gz", false);
+	REQUIRE( r2->status == 200 );
+	REQUIRE( r2->ContentLength == 123048 );
+	REQUIRE( c.getConnCount() == 1 );
+	size_t r2_cb_read=0;
+	std::string r2_cb_read_str;
+	c.StreamReadData(r2, [&r2_cb_read_str, &r2_cb_read](const char *buf, size_t len) -> bool {
+		r2_cb_read += len;
+		r2_cb_read_str += std::string(buf, len);
+		return true;/* "gimme back control flow" */
+	}, true/*disable full content drain*/);
+	REQUIRE( r2_cb_read > 0 );
+	REQUIRE( r2_cb_read < 123048 ); //This is faulty assertion (depends on how nginx will answer)
+	c.StreamReadData(r2, [&r2_cb_read_str, &r2_cb_read](const char *buf, size_t len) -> bool { //Continue read
+		r2_cb_read += len;
+		r2_cb_read_str += std::string(buf, len);
+		return false;/*continue until end*/
+	});
+	REQUIRE( r2_cb_read == 123048 );
+	REQUIRE( r2_cb_read_str == drain_read_str );
+
+	//PreloadBytes
+	auto r3 = c.GET("/Pg-hstore-1.01.tar.gz", false);
+	REQUIRE( r3->status == 200 );
+	REQUIRE( r3->ContentLength == 123048 );
+	REQUIRE( c.getConnCount() == 1 );
+	REQUIRE( r3->BytesBuffer() < 123048 );
+	REQUIRE( r3->ContentLength == (r3->BytesBuffer() + r3->BytesLeft()) );
+	c.PrelaodBytes(r3, 12345); //preload 12345 bytes from socket
+	REQUIRE( r3->BytesBuffer() == 12345 );
+	REQUIRE( r3->BytesLeft() == (123048 - r3->BytesBuffer()) );
+	c.PrelaodBytes(r3, 0); //preload all
+	REQUIRE( r3->BytesBuffer() == 123048 );
+	std::string r3_drain_read_str = r3->drainRead();
+	REQUIRE( r3_drain_read_str == drain_read_str );
+
+	//Check connection is not screwed
+	auto r99 = c.GET("/Pg-hstore-1.01.tar.gz");
+	REQUIRE( r99->status == 200 );
+	REQUIRE( r99->ContentLength == 123048 );
+	REQUIRE( c.getConnCount() == 1 );
 }
 TEST_CASE( "HTTP GET timeouts tests", "[get]" ) {
 	{
-		ASIOLibs::HTTP::Conn c( *yield, io, ep, 1, 1 ); //Should be connect timeout
+		ASIOLibs::HTTP::Conn c( *yield, io, ep, 1, 100000 ); //Should be connect timeout
 		c.Headers()["Host"] = "forsakens.ru";
 		bool was_timeout = false;
 		try {
@@ -89,7 +142,7 @@ TEST_CASE( "HTTP GET timeouts tests", "[get]" ) {
 		REQUIRE( was_timeout == true );
 	}
 	{
-		ASIOLibs::HTTP::Conn c( *yield, io, ep, 1000, 1 ); //Should be read timeout
+		ASIOLibs::HTTP::Conn c( *yield, io, ep, 100000, 1 ); //Should be read timeout
 		c.Headers()["Host"] = "forsakens.ru";
 		bool was_timeout = false;
 		try {

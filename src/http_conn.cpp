@@ -29,7 +29,8 @@ extern "C" {
 		checkTimeout();
 
 enum {
-	max_send_try = 5
+	max_send_try = 5,
+	max_read_transfer = 4096*4
 };
 
 Conn::Conn(boost::asio::yield_context &_yield, boost::asio::io_service &_io,
@@ -218,13 +219,15 @@ std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
 
 	ret->read_buf.consume( hdr_end - data + sizeof(hdr_end_pattern)-1 ); //Remove headers from input stream
 
-	if( ret->ContentLength>=0 )
+	if( ret->ContentLength>=0 ) {
+		assert( ret->ContentLength >= ret->read_buf.size() );
 		ret->ReadLeft = ret->ContentLength - ret->read_buf.size();
+	}
 	if( read_body && ret->ContentLength>0 ) {
 		while( ret->ReadLeft > 0 ) {
 			TIMEOUT_START( read_timeout );
 			size_t rd = boost::asio::async_read(sock, ret->read_buf,
-				boost::asio::transfer_exactly(ret->ReadLeft>4096 ? 4096 : ret->ReadLeft), yield[error_code]);
+				boost::asio::transfer_exactly(ret->ReadLeft>max_read_transfer ? max_read_transfer : ret->ReadLeft), yield[error_code]);
 			TIMEOUT_END();
 			ret->ReadLeft -= rd;
 		}
@@ -233,7 +236,21 @@ std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
 	return ret;
 }
 
-void Conn::StreamReadData( std::unique_ptr< Response > &resp, std::function< bool(const char *buf, size_t len) > dataCallback ) {
+void Conn::PrelaodBytes( std::unique_ptr< Response > &resp, size_t count ) {
+	size_t len = resp->read_buf.size();
+	if( len >= count && count != 0 )
+		return; //Already have this count
+
+	if( count == 0 || count > (resp->ReadLeft + len) )
+		count = (resp->ReadLeft + len);
+	len = count - len;
+	TIMEOUT_START( read_timeout );
+	size_t rd = boost::asio::async_read(sock, resp->read_buf, boost::asio::transfer_exactly(len), yield[error_code]);
+	TIMEOUT_END();
+	resp->ReadLeft -= rd;
+}
+
+void Conn::StreamReadData( std::unique_ptr< Response > &resp, std::function< bool(const char *buf, size_t len) > dataCallback, bool disable_drain ) {
 	bool interrupt = false, disable_callback=false;
 	const char *buf;
 	size_t len;
@@ -245,11 +262,13 @@ void Conn::StreamReadData( std::unique_ptr< Response > &resp, std::function< boo
 				disable_callback = dataCallback(buf, len);
 			resp->read_buf.consume(len);
 		}
+		if( disable_callback && disable_drain )
+			return; //Leave socket unread
 		if( resp->ReadLeft > 0 ) {
 			while( resp->ReadLeft > 0 ) {
 				TIMEOUT_START( read_timeout );
 				size_t rd = boost::asio::async_read(sock, resp->read_buf,
-					boost::asio::transfer_exactly(resp->ReadLeft>4096 ? 4096 : resp->ReadLeft), yield[error_code]);
+					boost::asio::transfer_exactly(resp->ReadLeft>max_read_transfer ? max_read_transfer : resp->ReadLeft), yield[error_code]);
 				TIMEOUT_END();
 				resp->ReadLeft -= rd;
 			}

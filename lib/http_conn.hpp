@@ -33,11 +33,14 @@ struct Timeout : public std::runtime_error {
 
 struct Conn;
 struct Response {
-	ssize_t ContentLength, ReadLeft;
+	ssize_t ContentLength;
+	size_t ReadLeft;
 	int status;
 	std::map< std::string, std::string > headers;
 	std::string Dump() const;
 	std::string drainRead() const;
+	size_t BytesBuffer() const { return read_buf.size(); }
+	size_t BytesLeft() const { return ReadLeft; }
 
 private:
 	friend struct Conn;
@@ -75,9 +78,15 @@ struct Conn {
 	}
 
 	long getConnCount() const { return conn_count; }
+	long getConnTimeout() const { return conn_timeout; }
+	long getReadTimeout() const { return read_timeout; }
+	void setConnTimeout(long _conn_timeout) { conn_timeout=_conn_timeout; }
+	void setReadTimeout(long _read_timeout) { read_timeout=_read_timeout; }
 
-	//Stream data from socket by chunks. Callback should return true when no need more data
-	void StreamReadData( std::unique_ptr< Response > &resp, std::function< bool(const char *buf, size_t len) > dataCallback );
+	//Preload some number of bytes into resp. Useful when you want to read start of the response and then splice() or whatever. 0 for drain all
+	void PrelaodBytes( std::unique_ptr< Response > &resp, size_t count );
+	//Stream data from socket by chunks. Callback should return true when no need more data(rest of content will be dropped unless disable_drain set).
+	void StreamReadData( std::unique_ptr< Response > &resp, std::function< bool(const char *buf, size_t len) > dataCallback, bool disable_drain=false );
 	//Proxy(splice) data to another socket
 	void StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip::tcp::socket &dest );
 
