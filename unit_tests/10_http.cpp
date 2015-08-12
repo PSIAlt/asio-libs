@@ -155,6 +155,34 @@ TEST_CASE( "HTTP GET timeouts tests", "[get]" ) {
 		REQUIRE( was_timeout == true );
 	}
 }
+TEST_CASE( "HTTP lowlevel api", "[get]" ) {
+	ASIOLibs::HTTP::Conn c( *yield, io, ep ); //Should be connect timeout
+	c.Headers()["Host"] = "forsakens.ru";
+	c.WriteRequestHeaders("GET", "/test/503");
+	auto r0 = c.ReadAnswer();
+	REQUIRE( r0->status == 503 );
+	REQUIRE( r0->ReadLeft == 0 );
+
+	c.WriteRequestHeaders("GET", "/");
+	auto r1 = c.ReadAnswer();
+	REQUIRE( r1->status == 200 );
+	REQUIRE( r1->ContentLength > 0 );
+	REQUIRE( r1->ReadLeft == 0 );
+
+	c.WriteRequestHeaders("GET", "/");
+	auto r2 = c.ReadAnswer();
+	REQUIRE( r2->status == 200 );
+	REQUIRE( r2->ContentLength > 0 );
+	REQUIRE( r2->ReadLeft == 0 );
+
+	c.WriteRequestHeaders("GET", "/Pg-hstore-1.01.tar.gz");
+	auto r3 = c.ReadAnswer(false);
+	REQUIRE( r3->status == 200 );
+	REQUIRE( r3->ContentLength == 123048 );
+	REQUIRE( r3->ReadLeft > 0 );
+	c.PrelaodBytes(r3, 0);
+	REQUIRE( r3->ReadLeft == 0 );
+}
 
 int result=0;
 void run_spawn(boost::asio::yield_context _yield, int argc, char* const argv[]) {

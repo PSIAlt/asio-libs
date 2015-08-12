@@ -291,11 +291,33 @@ void Conn::StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip:
 		boost::asio::async_read(sock, boost::asio::null_buffers(), yield[error_code]); //Have somthing to read
 		TIMEOUT_END();
 		boost::asio::async_write(dest, boost::asio::null_buffers(), yield); //Can write
-		size_t rd = splice( sock.native_handle(), NULL, dest.native_handle(), NULL, resp->ReadLeft, SPLICE_F_MOVE | SPLICE_F_NONBLOCK | SPLICE_F_MORE);
+		ssize_t rd = splice( sock.native_handle(), NULL, dest.native_handle(), NULL, resp->ReadLeft, SPLICE_F_MOVE | SPLICE_F_NONBLOCK | SPLICE_F_MORE);
+		if( rd == -1 )
+			throw std::runtime_error( std::string("splice() failed: ") + strerror(errno) );
 		resp->ReadLeft -= rd;
 	}
 #endif
 }
+
+bool Conn::WriteRequestHeaders(const char *cmd, const std::string &uri, size_t ContentLength) try {
+	headersCacheCheck();
+	std::string req = ASIOLibs::string_sprintf("%s %s HTTP/1.1\nContent-Length: %zu\n%s",
+		cmd, uri.c_str(), ContentLength, headers_cache.c_str());
+	writeRequest( req.data(), req.size(), false );
+	return true;
+} catch (std::exception &e) {
+	close();
+	throw;
+}
+
+bool Conn::WriteRequestData(const char *buf, size_t len) try {
+	size_t wr = boost::asio::async_write(sock, boost::asio::buffer(buf, len), yield);
+	assert( wr == len );
+} catch (std::exception &e) {
+	close();
+	throw;
+}
+
 
 std::string Response::Dump() const {
 	ASIOLibs::StrFormatter s;

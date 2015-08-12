@@ -41,6 +41,7 @@ struct Response {
 	std::string drainRead() const;
 	size_t BytesBuffer() const { return read_buf.size(); }
 	size_t BytesLeft() const { return ReadLeft; }
+	bool isDrained() const { return BytesBuffer()==0 && BytesLeft()==0; }
 
 private:
 	friend struct Conn;
@@ -90,13 +91,17 @@ struct Conn {
 	//Proxy(splice) data to another socket
 	void StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip::tcp::socket &dest );
 
+	//Prefer not to use this unless you want some dangerous magic
+	bool WriteRequestHeaders(const char *cmd, const std::string &uri, size_t ContentLength = 0);
+	bool WriteRequestData(const char *buf, size_t len);
+	std::unique_ptr< Response > ReadAnswer(bool read_body=true);
+
 private:
 	void setupTimeout(long milliseconds);
 	void onTimeout(const boost::system::error_code &ec);
 	void checkTimeout();
 
 	void writeRequest(const char *buf, size_t sz, bool wait_read );
-	std::unique_ptr< Response > ReadAnswer(bool read_body);
 
 	void headersCacheCheck();
 
