@@ -313,6 +313,7 @@ bool Conn::WriteRequestHeaders(const char *cmd, const std::string &uri, size_t C
 bool Conn::WriteRequestData(const char *buf, size_t len) try {
 	size_t wr = boost::asio::async_write(sock, boost::asio::buffer(buf, len), yield);
 	assert( wr == len );
+	return true;
 } catch (std::exception &e) {
 	close();
 	throw;
