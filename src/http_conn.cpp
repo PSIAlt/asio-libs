@@ -206,9 +206,9 @@ std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
 
 	bool l_must_reconnect = true;
 	for(size_t i=0; i < num_headers; i++) {
-		if( !strncmp(headers[i].name, "Content-Length", headers[i].name_len) ) {
+		if( !strncasecmp(headers[i].name, "Content-Length", headers[i].name_len) ) {
 			ret->ContentLength = strtol(headers[i].value, NULL, 0);
-		}else if( !strncmp(headers[i].name, "Connection", headers[i].name_len) && !strncasecmp(headers[i].value, "Keep-Alive", headers[i].value_len) ) {
+		}else if( !strncasecmp(headers[i].name, "Connection", headers[i].name_len) && !strncasecmp(headers[i].value, "Keep-Alive", headers[i].value_len) ) {
 			l_must_reconnect = false;
 		}
 		std::string hdr_name(headers[i].name, headers[i].name_len);
