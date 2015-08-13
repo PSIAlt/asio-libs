@@ -107,7 +107,7 @@ std::unique_ptr< Response > Conn::HEAD(const std::string &uri) {
 std::unique_ptr< Response > Conn::MOVE(const std::string &uri_from, const std::string &uri_to, bool allow_overwrite) {
 	headersCacheCheck();
 	std::string req = ASIOLibs::string_sprintf("MOVE %s HTTP/1.1\nDestination: %s\nOverwrite: %s\n%s",
-		uri_from.c_str(), uri_to.c_str(), (allow_overwrite ? "F" : "T"), headers_cache.c_str());
+		uri_from.c_str(), uri_to.c_str(), (allow_overwrite ? "T" : "F"), headers_cache.c_str());
 	writeRequest( req.data(), req.size(), true );
 	return ReadAnswer(true);
 }
@@ -211,7 +211,9 @@ std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
 		}else if( !strncmp(headers[i].name, "Connection", headers[i].name_len) && !strncasecmp(headers[i].value, "Keep-Alive", headers[i].value_len) ) {
 			l_must_reconnect = false;
 		}
-		ret->headers.emplace( std::make_pair(std::string(headers[i].name, headers[i].name_len), std::string(headers[i].value, headers[i].value_len)) );
+		std::string hdr_name(headers[i].name, headers[i].name_len);
+		std::transform(hdr_name.begin(), hdr_name.end(), hdr_name.begin(), ::toupper);
+		ret->headers.emplace( std::make_pair(std::move(hdr_name), std::string(headers[i].value, headers[i].value_len)) );
 	}
 	must_reconnect = must_reconnect || l_must_reconnect;
 
@@ -310,7 +312,7 @@ bool Conn::WriteRequestHeaders(const char *cmd, const std::string &uri, size_t C
 	throw;
 }
 
-bool Conn::WriteRequestData(const char *buf, size_t len) try {
+bool Conn::WriteRequestData(const void *buf, size_t len) try {
 	size_t wr = boost::asio::async_write(sock, boost::asio::buffer(buf, len), yield);
 	assert( wr == len );
 	return true;

@@ -64,7 +64,7 @@ struct Conn {
 
 	std::unique_ptr< Response > GET(const std::string &uri, bool full_body_read = true);
 	std::unique_ptr< Response > HEAD(const std::string &uri);
-	std::unique_ptr< Response > MOVE(const std::string &uri_from, const std::string &uri_to, bool allow_overwrite = true);
+	std::unique_ptr< Response > MOVE(const std::string &uri_from, const std::string &uri_to, bool allow_overwrite);
 
 	std::unique_ptr< Response > POST(const std::string &uri, const char *postdata, size_t postlen, const char *cmd = "POST");
 	std::unique_ptr< Response > PUT(const std::string &uri, const char *postdata, size_t postlen) {
@@ -93,7 +93,7 @@ struct Conn {
 
 	//Prefer not to use this unless you want some dangerous magic
 	bool WriteRequestHeaders(const char *cmd, const std::string &uri, size_t ContentLength = 0);
-	bool WriteRequestData(const char *buf, size_t len);
+	bool WriteRequestData(const void *buf, size_t len);
 	std::unique_ptr< Response > ReadAnswer(bool read_body=true);
 
 private:
