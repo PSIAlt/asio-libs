@@ -4,21 +4,21 @@ OBJDIR = obj/
 TESTDIR = unit_tests/
 
 UNAME := $(shell uname)
+CXX = g++
+CC = gcc
+SEDFLAG = -r
 ifeq ($(UNAME), FreeBSD)
-#	CXX = g++47
 	CXX = clang
+	CC = clang
 	SEDFLAG = -E
-else
-ifeq ($(UNAME), Darwin)
-        CXX = clang++
-        SEDFLAG = -E
-else
-	CXX = g++
-	SEDFLAG = -r
 endif
+ifeq ($(UNAME), Darwin)
+	CXX = clang++
+	CC = clang
+	SEDFLAG = -E
 endif
 
-CC = $(CXX)
+CFLAGS = $(ADD_CXXFLAGS) -Wall -O2 -ggdb3 -std=c99 -I $(LIBDIR)
 CXXFLAGS = $(ADD_CXXFLAGS) -std=c++11 -Wall -I /usr/include/ -I /usr/local/include/ -I $(LIBDIR) -O2 -I /usr/local/lib/gcc47/include/ -ggdb3
 LDFLAGS = -L /usr/local/lib/ -L /usr/lib/ -lboost_system -lboost_thread-mt -lboost_coroutine-mt
 SRCST = $(wildcard $(SRCDIR)*.cpp)
@@ -28,7 +28,12 @@ SRC_TEST_ST = $(wildcard $(TESTDIR)*.cpp)
 SRC_TEST = $(SRC_TEST_ST:$(TESTDIR)%=%)
 OBJS_TEST = $(SRC_TEST:.cpp=.test)
 
+OBJS += picohttpparser.o
+
 all: depend $(addprefix $(OBJDIR), $(OBJS))
+
+$(OBJDIR)picohttpparser.o: $(SRCDIR)picohttpparser.c
+	$(CC) $(CFLAGS) -c -o $@ $< 
 
 tests: $(addprefix $(TESTDIR), main.cpp) $(addprefix $(OBJDIR), $(OBJS))
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $(OBJDIR)unit_tests $^

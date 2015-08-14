@@ -11,7 +11,7 @@ namespace ASIOLibs {
 namespace HTTP {
 
 extern "C" {
-#include "picohttpparser.inc"
+#include "picohttpparser.h"
 };
 
 #define TIMEOUT_START(x) \
