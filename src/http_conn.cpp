@@ -322,18 +322,20 @@ void Conn::StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip:
 		TIMING_STAT_END();
 	}
 	while( resp->ReadLeft > 0 ) {
-		TIMEOUT_START( read_timeout );
-		TIMING_STAT_START("http_read");
-		boost::asio::async_read(sock, boost::asio::null_buffers(), yield[error_code]); //Have somthing to read
-		TIMING_STAT_END();
-		TIMEOUT_END();
-		TIMING_STAT_START("client_write");
-		boost::asio::async_write(dest, boost::asio::null_buffers(), yield); //Can write
-		TIMING_STAT_END();
 		ssize_t rd = splice( sock.native_handle(), NULL, dest.native_handle(), NULL, resp->ReadLeft, SPLICE_F_MOVE | SPLICE_F_NONBLOCK | SPLICE_F_MORE);
-		if( rd == -1 )
+		if( rd == -1 && errno != EAGAIN )
 			throw std::runtime_error( std::string("splice() failed: ") + strerror(errno) );
-		resp->ReadLeft -= rd;
+		else if( rd < 1 ) {
+			TIMEOUT_START( read_timeout );
+			TIMING_STAT_START("http_read");
+			boost::asio::async_read(sock, boost::asio::null_buffers(), yield[error_code]); //Have somthing to read
+			TIMING_STAT_END();
+			TIMEOUT_END();
+			TIMING_STAT_START("client_write");
+			boost::asio::async_write(dest, boost::asio::null_buffers(), yield); //Can write
+			TIMING_STAT_END();
+		} else
+			resp->ReadLeft -= rd;
 	}
 #endif
 }
@@ -359,6 +361,52 @@ bool Conn::WriteRequestData(const void *buf, size_t len) try {
 } catch (std::exception &e) {
 	close();
 	throw;
+}
+
+ssize_t Conn::WriteTee(boost::asio::ip::tcp::socket &sock_from, size_t max_bytes) {
+#ifndef SPLICE_F_MOVE
+	assert( !"Cant call ASIOLibs::HTTP::Conn::WriteTee: tee(2) is linux-only call" );
+	abort();
+#else
+	TIMEOUT_START( read_timeout );
+	TIMING_STAT_START("http_write");
+	boost::asio::async_read(sock, boost::asio::null_buffers(), yield[error_code]); //Have somthing to read
+	TIMING_STAT_END();
+	TIMEOUT_END();
+	TIMING_STAT_START("client_read");
+	boost::asio::async_write(sock_from, boost::asio::null_buffers(), yield); //Can write
+	TIMING_STAT_END();
+	ssize_t wr = tee(sock_from.native_handle(), sock.native_handle(), max_bytes-wr_total, SPLICE_F_MORE | SPLICE_F_NONBLOCK);
+	if( wr == -1 )
+		throw std::runtime_error( std::string("tee() failed: ") + strerror(errno) );
+	return wr;
+#endif
+}
+
+ssize_t Conn::WriteSplice(boost::asio::ip::tcp::socket &sock_from, size_t max_bytes) {
+#ifndef SPLICE_F_MOVE
+	assert( !"Cant call ASIOLibs::HTTP::Conn::WriteSplice: splice(2) is linux-only call" );
+	abort();
+#else
+	ssize_t wr_total=0;
+	while( max_bytes > wr_total ) {
+		ssize_t wr = splice( sock_from.native_handle(), NULL, sock.native_handle(), NULL, max_bytes-wr_total, SPLICE_F_MOVE | SPLICE_F_NONBLOCK | SPLICE_F_MORE);
+		if( rd == -1 && errno != EAGAIN )
+			throw std::runtime_error( std::string("splice() failed: ") + strerror(errno) );
+		else if( rd < 1 ) {
+			TIMEOUT_START( read_timeout );
+			TIMING_STAT_START("http_write");
+			boost::asio::async_read(sock, boost::asio::null_buffers(), yield[error_code]); //Have somthing to read
+			TIMING_STAT_END();
+			TIMEOUT_END();
+			TIMING_STAT_START("client_read");
+			boost::asio::async_write(sock_from, boost::asio::null_buffers(), yield); //Can write
+			TIMING_STAT_END();
+		} else
+			wr_total += wr;
+	}
+	return wr_total;
+#endif
 }
 
 

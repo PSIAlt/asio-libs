@@ -93,12 +93,15 @@ struct Conn {
 	//Proxy(splice) data to another socket
 	void StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip::tcp::socket &dest );
 
+
+	void SetTimingStat( TimingStat *_stat ) { stat = _stat; }
+
 	//Prefer not to use this unless you want some dangerous magic
 	bool WriteRequestHeaders(const char *cmd, const std::string &uri, size_t ContentLength = 0);
 	bool WriteRequestData(const void *buf, size_t len);
+	ssize_t WriteTee(boost::asio::ip::tcp::socket &sock_from, size_t max_bytes);
+	ssize_t WriteSplice(boost::asio::ip::tcp::socket &sock_from, size_t max_bytes);
 	std::unique_ptr< Response > ReadAnswer(bool read_body=true);
-
-	void SetTimingStat( TimingStat *_stat ) { stat = _stat; }
 
 private:
 	void setupTimeout(long milliseconds);
