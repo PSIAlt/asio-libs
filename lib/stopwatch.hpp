@@ -21,6 +21,7 @@ struct StopWatch {
 	StopWatch(std::string &&metric_name, TimingStat *_stat = nullptr);
 	StopWatch(const std::string &metric_name, TimingStat *_stat = nullptr);
 	~StopWatch();
+	void setStat(TimingStat *_stat) { stat = _stat; };
 	uint64_t getElapsed() const;
 	uint64_t FlushStat();
 	const std::string &getMetricName() const { return metric_name; }

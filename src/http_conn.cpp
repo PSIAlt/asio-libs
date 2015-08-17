@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include "utils.hpp"
 #include "http_conn.hpp"
+#include "stopwatch.hpp"
 
 #define DEBUG(x) //std::cerr << x << std::endl;
 
@@ -26,6 +27,15 @@ extern "C" {
 		} \
 		checkTimeout();
 
+#define TIMING_STAT_START(name) \
+		{ \
+		std::unique_ptr<StopWatch> sw; \
+		if( stat ) \
+			sw.reset( new StopWatch(name, stat) );
+
+#define TIMING_STAT_END() \
+		}
+
 enum {
 	max_send_try = 5,
 	max_read_transfer = 4096*4
@@ -34,7 +44,8 @@ enum {
 Conn::Conn(boost::asio::yield_context &_yield, boost::asio::io_service &_io,
 		boost::asio::ip::tcp::endpoint &_ep, long _conn_timeout, long _read_timeout)
 		: yield(_yield), ep(_ep), sock(_io), timer(_io), conn_timeout(_conn_timeout),
-			read_timeout(_read_timeout), conn_count(0), is_timeout(false), headers_cache_clear(true), must_reconnect(true) {
+			read_timeout(_read_timeout), conn_count(0), is_timeout(false), headers_cache_clear(true),
+			must_reconnect(true), stat(nullptr) {
 	headers["User-Agent"] = "ASIOLibs " ASIOLIBS_VERSION;
 	headers["Connection"] = "Keep-Alive";
 }
@@ -43,7 +54,9 @@ void Conn::checkConnect() {
 	if( !sock.is_open() || must_reconnect ) {
 		close();
 		TIMEOUT_START( conn_timeout );
+		TIMING_STAT_START("http_connect");
 		sock.async_connect(ep, yield[error_code]);
+		TIMING_STAT_END();
 		TIMEOUT_END();
 		conn_count++;
 		must_reconnect=false;
@@ -129,7 +142,9 @@ std::unique_ptr< Response > Conn::DoPostRequest(const char *cmd, const std::stri
 			is_done = getDataCallback(&postdata, &postlen);
 			if( postdata == NULL )
 				ReadAnswer(true);
+			TIMING_STAT_START("http_write");
 			boost::asio::async_write(sock, boost::asio::buffer(postdata, postlen), yield[error_code]);
+			TIMING_STAT_END();
 			if( !can_recall && error_code )
 				throw boost::system::system_error(error_code);
 			if( error_code )
@@ -160,11 +175,15 @@ void Conn::writeRequest(const char *buf, size_t sz, bool wait_read) {
 	DEBUG( "writeRequest " << std::string(buf, sz) );
 	while( try_count++ < max_send_try ) {
 		checkConnect();
+		TIMING_STAT_START("http_write");
 		boost::asio::async_write(sock, boost::asio::buffer(buf, sz), yield[error_code]);
+		TIMING_STAT_END();
 		if( !error_code ) {
 			if( wait_read ) {
 				setupTimeout( read_timeout );
+				TIMING_STAT_START("http_read");
 				boost::asio::async_read(sock, boost::asio::null_buffers(), yield[error_code]);
+				TIMING_STAT_END();
 				TIMEOUT_END();
 			}
 			if( !error_code )
@@ -183,7 +202,9 @@ std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
 	ret->ReadLeft = 0;
 
 	TIMEOUT_START( read_timeout );
+	TIMING_STAT_START("http_read");
 	boost::asio::async_read_until(sock, ret->read_buf, std::string(hdr_end_pattern), yield[error_code]);
+	TIMING_STAT_END();
 	TIMEOUT_END();
 
 	const char *data = boost::asio::buffer_cast<const char *>( ret->read_buf.data() );
@@ -226,8 +247,11 @@ std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
 	if( read_body && ret->ContentLength>0 ) {
 		while( ret->ReadLeft > 0 ) {
 			TIMEOUT_START( read_timeout );
-			size_t rd = boost::asio::async_read(sock, ret->read_buf,
+			size_t rd;
+			TIMING_STAT_START("http_read");
+			rd = boost::asio::async_read(sock, ret->read_buf,
 				boost::asio::transfer_exactly(ret->ReadLeft>max_read_transfer ? max_read_transfer : ret->ReadLeft), yield[error_code]);
+			TIMING_STAT_END();
 			TIMEOUT_END();
 			ret->ReadLeft -= rd;
 		}
@@ -245,7 +269,10 @@ void Conn::PrelaodBytes( std::unique_ptr< Response > &resp, size_t count ) {
 		count = (resp->ReadLeft + len);
 	len = count - len;
 	TIMEOUT_START( read_timeout );
-	size_t rd = boost::asio::async_read(sock, resp->read_buf, boost::asio::transfer_exactly(len), yield[error_code]);
+	size_t rd;
+	TIMING_STAT_START("http_read");
+	rd = boost::asio::async_read(sock, resp->read_buf, boost::asio::transfer_exactly(len), yield[error_code]);
+	TIMING_STAT_END();
 	TIMEOUT_END();
 	resp->ReadLeft -= rd;
 }
@@ -270,8 +297,11 @@ void Conn::StreamReadData( std::unique_ptr< Response > &resp, std::function< siz
 		if( resp->ReadLeft > 0 ) {
 			while( resp->ReadLeft > 0 ) {
 				TIMEOUT_START( read_timeout );
-				size_t rd = boost::asio::async_read(sock, resp->read_buf,
+				size_t rd;
+				TIMING_STAT_START("http_read");
+				rd = boost::asio::async_read(sock, resp->read_buf,
 					boost::asio::transfer_exactly(resp->ReadLeft>max_read_transfer ? max_read_transfer : resp->ReadLeft), yield[error_code]);
+				TIMING_STAT_END();
 				TIMEOUT_END();
 				resp->ReadLeft -= rd;
 			}
@@ -286,13 +316,20 @@ void Conn::StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip:
 	assert( !"Cant call ASIOLibs::HTTP::Conn::StreamSpliceData: splice(2) is linux-only call" );
 	abort();
 #else
-	if( resp->read_buf.size() )
+	if( resp->read_buf.size() ) {
+		TIMING_STAT_START("client_write");
 		boost::asio::async_write(dest, resp->read_buf, yield);
+		TIMING_STAT_END();
+	}
 	while( resp->ReadLeft > 0 ) {
 		TIMEOUT_START( read_timeout );
+		TIMING_STAT_START("http_read");
 		boost::asio::async_read(sock, boost::asio::null_buffers(), yield[error_code]); //Have somthing to read
+		TIMING_STAT_END();
 		TIMEOUT_END();
+		TIMING_STAT_START("client_write");
 		boost::asio::async_write(dest, boost::asio::null_buffers(), yield); //Can write
+		TIMING_STAT_END();
 		ssize_t rd = splice( sock.native_handle(), NULL, dest.native_handle(), NULL, resp->ReadLeft, SPLICE_F_MOVE | SPLICE_F_NONBLOCK | SPLICE_F_MORE);
 		if( rd == -1 )
 			throw std::runtime_error( std::string("splice() failed: ") + strerror(errno) );
@@ -313,7 +350,10 @@ bool Conn::WriteRequestHeaders(const char *cmd, const std::string &uri, size_t C
 }
 
 bool Conn::WriteRequestData(const void *buf, size_t len) try {
-	size_t wr = boost::asio::async_write(sock, boost::asio::buffer(buf, len), yield);
+	size_t wr;
+	TIMING_STAT_START("http_write");
+	wr = boost::asio::async_write(sock, boost::asio::buffer(buf, len), yield);
+	TIMING_STAT_END();
 	assert( wr == len );
 	return true;
 } catch (std::exception &e) {

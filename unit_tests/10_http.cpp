@@ -1,10 +1,11 @@
 #define CATCH_CONFIG_RUNNER
+#include "catch.hpp"
 #include <iostream>
 #include <boost/bind.hpp>
 #include <boost/asio.hpp>
 #include <boost/asio/spawn.hpp>
 #include "http_conn.hpp"
-#include "catch.hpp"
+#include "stopwatch.hpp"
 
 using namespace std;
 boost::asio::io_service io;
@@ -182,6 +183,28 @@ TEST_CASE( "HTTP lowlevel api", "[get]" ) {
 	REQUIRE( r3->ReadLeft > 0 );
 	c.PrelaodBytes(r3, 0);
 	REQUIRE( r3->ReadLeft == 0 );
+}
+
+TEST_CASE( "HTTP stopwatch", "[stopwatch]" ) {
+	ASIOLibs::TimingStat ts;
+	ASIOLibs::HTTP::Conn c( *yield, io, ep );
+	c.SetTimingStat( &ts );
+
+	c.Headers()["Host"] = "forsakens.ru";
+	auto r0 = c.GET("/");
+	REQUIRE( r0->status == 200 );
+	REQUIRE( r0->ContentLength > 0 );
+	REQUIRE( c.getConnCount() == 1 );
+	REQUIRE( ts.Stat().at("http_connect") > 0 );
+	REQUIRE( ts.Stat().at("http_read") > 0 );
+	REQUIRE( ts.Stat().at("http_write") > 0 );
+	auto r1 = c.GET("/test/503");
+	REQUIRE( r1->status == 503 );
+	REQUIRE( r1->ContentLength > 0 );
+	REQUIRE( c.getConnCount() == 1 );
+	REQUIRE( ts.Stat().at("http_connect") > 0 );
+	REQUIRE( ts.Stat().at("http_read") > 0 );
+	REQUIRE( ts.Stat().at("http_write") > 0 );
 }
 
 int result=0;

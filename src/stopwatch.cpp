@@ -28,6 +28,7 @@ StopWatch::StopWatch(std::string &&_metric_name, TimingStat *_stat)
 	clock_gettime(CLOCK_MONOTONIC, &ts_start);
 #endif
 }
+
 StopWatch::StopWatch(const std::string &_metric_name, TimingStat *_stat)
 	: metric_name(_metric_name), stat(_stat) {
 

@@ -15,6 +15,8 @@
 #include <boost/system/error_code.hpp>
 
 namespace ASIOLibs {
+
+struct TimingStat;
 namespace HTTP {
 
 /*
@@ -96,6 +98,8 @@ struct Conn {
 	bool WriteRequestData(const void *buf, size_t len);
 	std::unique_ptr< Response > ReadAnswer(bool read_body=true);
 
+	void SetTimingStat( TimingStat *_stat ) { stat = _stat; }
+
 private:
 	void setupTimeout(long milliseconds);
 	void onTimeout(const boost::system::error_code &ec);
@@ -111,6 +115,7 @@ private:
 	boost::asio::deadline_timer timer;
 	long conn_timeout, read_timeout, conn_count;
 	bool is_timeout, headers_cache_clear, must_reconnect;
+	TimingStat *stat;
 
 	std::map< std::string, std::string > headers;
 	std::string headers_cache;
