@@ -5,6 +5,7 @@
 #include <string>
 #include <memory>
 #include <map>
+#include <vector>
 #include <string>
 #include <functional>
 #include <boost/asio/spawn.hpp>
@@ -38,7 +39,8 @@ struct Response {
 	ssize_t ContentLength;
 	size_t ReadLeft;
 	int status;
-	std::map< std::string, std::string > headers;
+	std::vector< std::pair<std::string, std::string> > headers;
+	const std::string *GetHeader(const std::string &name); //return nullptr when not found
 	std::string Dump() const;
 	std::string drainRead() const;
 	size_t BytesBuffer() const { return read_buf.size(); }
@@ -99,8 +101,8 @@ struct Conn {
 	//Prefer not to use this unless you want some dangerous magic
 	bool WriteRequestHeaders(const char *cmd, const std::string &uri, size_t ContentLength = 0);
 	bool WriteRequestData(const void *buf, size_t len);
-	ssize_t WriteTee(boost::asio::ip::tcp::socket &sock_from, size_t max_bytes);
-	ssize_t WriteSplice(boost::asio::ip::tcp::socket &sock_from, size_t max_bytes);
+	size_t WriteTee(boost::asio::ip::tcp::socket &sock_from, size_t max_bytes);
+	size_t WriteSplice(boost::asio::ip::tcp::socket &sock_from, size_t max_bytes);
 	std::unique_ptr< Response > ReadAnswer(bool read_body=true);
 
 private:

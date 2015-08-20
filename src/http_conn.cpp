@@ -1,7 +1,9 @@
 #include <iostream>
+#include <algorithm>
 #include <boost/asio.hpp>
 #include <boost/bind.hpp>
 #include <fcntl.h>
+#include "perf.hpp"
 #include "utils.hpp"
 #include "http_conn.hpp"
 #include "stopwatch.hpp"
@@ -51,7 +53,7 @@ Conn::Conn(boost::asio::yield_context &_yield, boost::asio::io_service &_io,
 }
 
 void Conn::checkConnect() {
-	if( !sock.is_open() || must_reconnect ) {
+	if( unlikely(!sock.is_open() || must_reconnect) ) {
 		close();
 		TIMEOUT_START( conn_timeout );
 		TIMING_STAT_START("http_connect");
@@ -67,7 +69,7 @@ void Conn::reconnect() {
 	checkConnect();
 }
 void Conn::close() {
-	if( sock.is_open() ) sock.close();
+	if( likely(sock.is_open()) ) sock.close();
 }
 void Conn::setupTimeout(long milliseconds) {
 	is_timeout=false;
@@ -75,14 +77,14 @@ void Conn::setupTimeout(long milliseconds) {
 	timer.async_wait( boost::bind(&Conn::onTimeout, this, boost::asio::placeholders::error) );
 }
 void Conn::onTimeout(const boost::system::error_code &ec) {
-	if( !ec && timer.expires_from_now() <= boost::posix_time::seconds(0) ) {
+	if( likely(!ec && timer.expires_from_now() <= boost::posix_time::seconds(0)) ) {
 		close();
 		is_timeout=true;
 	}
 }
 void Conn::checkTimeout() {
 	timer.cancel();
-	if( is_timeout ) {
+	if( unlikely(is_timeout) ) {
 		close();
 		throw Timeout( "ASIOLibs::HTTP::Conn: Timeout while requesting " + ep.address().to_string() );
 	}
@@ -145,16 +147,16 @@ std::unique_ptr< Response > Conn::DoPostRequest(const char *cmd, const std::stri
 			TIMING_STAT_START("http_write");
 			boost::asio::async_write(sock, boost::asio::buffer(postdata, postlen), yield[error_code]);
 			TIMING_STAT_END();
-			if( !can_recall && error_code )
+			if( unlikely(!can_recall && error_code) )
 				throw boost::system::system_error(error_code);
-			if( error_code )
+			if( unlikely(error_code) )
 				break;
 		}
-		if( error_code == boost::asio::error::operation_aborted )
+		if( unlikely(error_code == boost::asio::error::operation_aborted) )
 			throw boost::system::system_error(error_code);
-		if( !error_code )
+		if( likely(!error_code) )
 			return ReadAnswer(true);
-		if( sock.is_open() ) //Dunno wtf happend, just reconnect
+		if( unlikely(sock.is_open()) ) //Dunno wtf happend, just reconnect
 			reconnect();
 	}
 	throw boost::system::system_error(error_code);
@@ -178,7 +180,7 @@ void Conn::writeRequest(const char *buf, size_t sz, bool wait_read) {
 		TIMING_STAT_START("http_write");
 		boost::asio::async_write(sock, boost::asio::buffer(buf, sz), yield[error_code]);
 		TIMING_STAT_END();
-		if( !error_code ) {
+		if( likely(!error_code) ) {
 			if( wait_read ) {
 				setupTimeout( read_timeout );
 				TIMING_STAT_START("http_read");
@@ -186,10 +188,10 @@ void Conn::writeRequest(const char *buf, size_t sz, bool wait_read) {
 				TIMING_STAT_END();
 				TIMEOUT_END();
 			}
-			if( !error_code )
+			if( likely(!error_code) )
 				return;
 		}
-		if( sock.is_open() ) //Dunno wtf happend, just reconnect
+		if( unlikely(sock.is_open()) ) //Dunno wtf happend, just reconnect
 			reconnect();
 	}
 	throw boost::system::system_error(error_code);
@@ -211,7 +213,7 @@ std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
 	size_t sz = ret->read_buf.size();
 	DEBUG("ReadAnswer: " << std::string(data, sz));
 	const char *hdr_end = (const char *)memmem(data, sz, hdr_end_pattern, sizeof(hdr_end_pattern)-1);
-	if( !hdr_end )
+	if( unlikely(!hdr_end) )
 		throw std::runtime_error("Cant find headers end");
 
 	//Parse respnse status
@@ -222,25 +224,27 @@ std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
 	size_t msg_len;
 	int pret = phr_parse_response(data, hdr_end-data+sizeof(hdr_end_pattern)-1, &minor_version, &ret->status, &msg, &msg_len, headers, &num_headers, 0);
 
-	if( pret != -2 && pret <= 0 )
+	if( unlikely(pret != -2 && pret <= 0) )
 		throw std::runtime_error("Cant parse http response: " + std::to_string(pret));
 
 	bool l_must_reconnect = true;
 	for(size_t i=0; i < num_headers; i++) {
-		if( !strncasecmp(headers[i].name, "Content-Length", headers[i].name_len) ) {
-			ret->ContentLength = strtol(headers[i].value, NULL, 0);
-		}else if( !strncasecmp(headers[i].name, "Connection", headers[i].name_len) && !strncasecmp(headers[i].value, "Keep-Alive", headers[i].value_len) ) {
-			l_must_reconnect = false;
-		}
 		std::string hdr_name(headers[i].name, headers[i].name_len);
 		std::transform(hdr_name.begin(), hdr_name.end(), hdr_name.begin(), ::toupper);
-		ret->headers.emplace( std::make_pair(std::move(hdr_name), std::string(headers[i].value, headers[i].value_len)) );
+
+		if( hdr_name == "CONTENT-LENGTH" ) {
+			ret->ContentLength = strtol(headers[i].value, NULL, 0);
+		}else if( hdr_name == "CONNECTION" && !strncasecmp(headers[i].value, "Keep-Alive", headers[i].value_len) ) {
+			l_must_reconnect = false;
+		}
+		ret->headers.emplace_back( std::move(hdr_name), std::string(headers[i].value, headers[i].value_len) );
 	}
 	must_reconnect = must_reconnect || l_must_reconnect;
+	std::sort(ret->headers.begin(), ret->headers.end());
 
 	ret->read_buf.consume( hdr_end - data + sizeof(hdr_end_pattern)-1 ); //Remove headers from input stream
 
-	if( ret->ContentLength>=0 ) {
+	if( likely(ret->ContentLength>=0) ) {
 		assert( static_cast<size_t>(ret->ContentLength) >= ret->read_buf.size() );
 		ret->ReadLeft = ret->ContentLength - ret->read_buf.size();
 	}
@@ -265,7 +269,7 @@ void Conn::PrelaodBytes( std::unique_ptr< Response > &resp, size_t count ) {
 	if( len >= count && count != 0 )
 		return; //Already have this count
 
-	if( count == 0 || count > (resp->ReadLeft + len) )
+	if( unlikely(count == 0 || count > (resp->ReadLeft + len)) )
 		count = (resp->ReadLeft + len);
 	len = count - len;
 	TIMEOUT_START( read_timeout );
@@ -283,7 +287,7 @@ void Conn::StreamReadData( std::unique_ptr< Response > &resp, std::function< siz
 	size_t len;
 	while( !interrupt ) {
 		len = resp->read_buf.size();
-		if( len>0 ) {
+		if( likely(len>0) ) {
 			buf = boost::asio::buffer_cast<const char *>( resp->read_buf.data() );
 			size_t consume_len = len;
 			if( ! disable_callback ) {
@@ -292,9 +296,9 @@ void Conn::StreamReadData( std::unique_ptr< Response > &resp, std::function< siz
 			}
 			resp->read_buf.consume(consume_len);
 		}
-		if( disable_callback && disable_drain )
+		if( unlikely(disable_callback && disable_drain) )
 			return; //Leave socket unread
-		if( resp->ReadLeft > 0 ) {
+		if( likely(resp->ReadLeft > 0) ) {
 			while( resp->ReadLeft > 0 ) {
 				TIMEOUT_START( read_timeout );
 				size_t rd;
@@ -323,7 +327,7 @@ void Conn::StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip:
 	}
 	while( resp->ReadLeft > 0 ) {
 		ssize_t rd = splice( sock.native_handle(), NULL, dest.native_handle(), NULL, resp->ReadLeft, SPLICE_F_MOVE | SPLICE_F_NONBLOCK | SPLICE_F_MORE);
-		if( rd == -1 && errno != EAGAIN )
+		if( unlikely(rd == -1 && errno != EAGAIN) )
 			throw std::runtime_error( std::string("splice() failed: ") + strerror(errno) );
 		else if( rd < 1 ) {
 			TIMEOUT_START( read_timeout );
@@ -363,7 +367,7 @@ bool Conn::WriteRequestData(const void *buf, size_t len) try {
 	throw;
 }
 
-ssize_t Conn::WriteTee(boost::asio::ip::tcp::socket &sock_from, size_t max_bytes) {
+size_t Conn::WriteTee(boost::asio::ip::tcp::socket &sock_from, size_t max_bytes) {
 #ifndef SPLICE_F_MOVE
 	assert( !"Cant call ASIOLibs::HTTP::Conn::WriteTee: tee(2) is linux-only call" );
 	abort();
@@ -376,24 +380,24 @@ ssize_t Conn::WriteTee(boost::asio::ip::tcp::socket &sock_from, size_t max_bytes
 	TIMING_STAT_START("client_read");
 	boost::asio::async_write(sock_from, boost::asio::null_buffers(), yield); //Can write
 	TIMING_STAT_END();
-	ssize_t wr = tee(sock_from.native_handle(), sock.native_handle(), max_bytes-wr_total, SPLICE_F_MORE | SPLICE_F_NONBLOCK);
-	if( wr == -1 )
+	ssize_t wr = tee(sock_from.native_handle(), sock.native_handle(), max_bytes, SPLICE_F_MORE | SPLICE_F_NONBLOCK);
+	if( unlikely(wr == -1) )
 		throw std::runtime_error( std::string("tee() failed: ") + strerror(errno) );
 	return wr;
 #endif
 }
 
-ssize_t Conn::WriteSplice(boost::asio::ip::tcp::socket &sock_from, size_t max_bytes) {
+size_t Conn::WriteSplice(boost::asio::ip::tcp::socket &sock_from, size_t max_bytes) {
 #ifndef SPLICE_F_MOVE
 	assert( !"Cant call ASIOLibs::HTTP::Conn::WriteSplice: splice(2) is linux-only call" );
 	abort();
 #else
-	ssize_t wr_total=0;
+	size_t wr_total=0;
 	while( max_bytes > wr_total ) {
 		ssize_t wr = splice( sock_from.native_handle(), NULL, sock.native_handle(), NULL, max_bytes-wr_total, SPLICE_F_MOVE | SPLICE_F_NONBLOCK | SPLICE_F_MORE);
-		if( rd == -1 && errno != EAGAIN )
+		if( unlikely(wr == -1 && errno != EAGAIN) )
 			throw std::runtime_error( std::string("splice() failed: ") + strerror(errno) );
-		else if( rd < 1 ) {
+		else if( wr < 1 ) {
 			TIMEOUT_START( read_timeout );
 			TIMING_STAT_START("http_write");
 			boost::asio::async_read(sock, boost::asio::null_buffers(), yield[error_code]); //Have somthing to read
@@ -424,6 +428,13 @@ std::string Response::drainRead() const {
 	std::string ret(data, sz);
 	read_buf.consume(sz);
 	return ret;
+}
+
+const std::string *Response::GetHeader(const std::string &name) {
+	auto it = std::lower_bound(headers.begin(), headers.end(), std::make_pair(name, std::string()) );
+	if( likely(it->first == name) )
+		return &it->second;
+	return nullptr;
 }
 
 };};

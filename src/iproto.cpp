@@ -1,4 +1,5 @@
 #include <cctype>
+#include "perf.hpp"
 #include "iproto.hpp"
 
 namespace IProto {
@@ -52,7 +53,7 @@ std::string Packet::Dump() const {
 //Packer
 template<typename T>
 void PackerSetValue<T>::operator()(Packet &pkt, uint32_t flags, const T &val) {
-	if( (pkt.hdr.len+sizeof(T)) > pkt.ofs ) {
+	if( unlikely((pkt.hdr.len+sizeof(T)) > pkt.ofs) ) {
 		pkt.ofs = pkt.ofs*2 + sizeof(T);
 		pkt.data = static_cast<char*>( realloc(pkt.data, pkt.ofs) );
 	}
@@ -65,7 +66,7 @@ template<> //instantiate for std::string
 void PackerSetValue<std::string>::operator()(Packet &pkt, uint32_t flags, const std::string &val) {
 	uint32_t sz = val.size();
 	PackerSetValue<uint32_t>()(pkt, flags, sz);
-	if( (pkt.hdr.len+sz) > pkt.ofs ) {
+	if( likely((pkt.hdr.len+sz) > pkt.ofs) ) {
 		pkt.ofs = pkt.ofs*2 + sz;
 		pkt.data = static_cast<char*>( realloc(pkt.data, pkt.ofs) );
 	}
@@ -86,7 +87,7 @@ void PackerSetValue< char * >::operator()(Packet &pkt, uint32_t flags, char * co
 template<> //instantiate for ByteBuffer
 void PackerSetValue<ByteBuffer>::operator()(Packet &pkt, uint32_t flags, const ByteBuffer &val) {
 	uint32_t sz = val.size;
-	if( (pkt.hdr.len+sz) > pkt.ofs ) {
+	if( likely( (pkt.hdr.len+sz) > pkt.ofs ) ) {
 		pkt.ofs = pkt.ofs*2 + sz;
 		pkt.data = static_cast<char*>( realloc(pkt.data, pkt.ofs) );
 	}
@@ -97,7 +98,7 @@ void PackerSetValue<ByteBuffer>::operator()(Packet &pkt, uint32_t flags, const B
 //Unpacker
 template<typename T>
 T UnpackerGetValue<T>::operator()(Packet &pkt, uint32_t flags) {
-	if( (pkt.ofs+sizeof(T)-sizeof(pkt.hdr)) > pkt.hdr.len )
+	if( unlikely( (pkt.ofs+sizeof(T)-sizeof(pkt.hdr)) > pkt.hdr.len ) )
 		throw tuple_missmatch( "Tuple missmatch at offset " + std::to_string(pkt.ofs) );
 	pkt.ofs += sizeof(T);
 	return *reinterpret_cast<T*>( pkt.data + pkt.ofs - sizeof(T) );
@@ -108,7 +109,7 @@ template<> //instantiate for std::string
 std::string UnpackerGetValue<std::string>::operator()(Packet &pkt, uint32_t flags) {
 	std::string v;
 	uint32_t v_len = UnpackerGetValue<uint32_t>()(pkt, flags);
-	if( (pkt.ofs+v_len-sizeof(pkt.hdr)) > pkt.hdr.len )
+	if( unlikely( (pkt.ofs+v_len-sizeof(pkt.hdr)) > pkt.hdr.len ) )
 		throw tuple_missmatch( "Tuple missmatch inside std::string at offset " + std::to_string(pkt.ofs) + " v_len=" + std::to_string(v_len) );
 	v.resize(v_len);
 	memcpy(&v[0], pkt.data+pkt.ofs, v_len);

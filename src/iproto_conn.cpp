@@ -2,6 +2,7 @@
 #include <cstdarg>
 #include <boost/asio.hpp>
 #include <boost/bind.hpp>
+#include "perf.hpp"
 #include "iproto.hpp"
 #include "iproto_conn.hpp"
 
@@ -37,7 +38,7 @@ Conn::~Conn() {
 }
 
 bool Conn::checkConnect() {
-	if( !sock.is_open() ) {
+	if( unlikely(!sock.is_open()) ) {
 		beginConnect();
 		return true;
 	}
@@ -54,7 +55,7 @@ void Conn::beginConnect() {
 		log_func("[iproto_conn] Connecting to %s:%d", ep.address().to_string().c_str(), ep.port() );
 }
 void Conn::reconnect() {
-	if( sock.is_open() )
+	if( likely(sock.is_open()) )
 		sock.close();
 	beginConnect();
 }
@@ -71,7 +72,7 @@ void Conn::reconnectByTimer(const boost::system::error_code& error) {
 		reconnect();
 }
 void Conn::onConnect(const boost::system::error_code& error) {
-	if( !error ) {
+	if( likely(!error) ) {
 		if( LOG_DEBUG )
 			log_func("[iproto_conn] Connected");
 		timer.cancel();
@@ -81,12 +82,12 @@ void Conn::onConnect(const boost::system::error_code& error) {
 }
 
 void Conn::setupReadHandler() {
-	if( !rd_buf || rd_buf->size()==0 )
+	if( likely(!rd_buf || rd_buf->size()==0) )
 		rd_buf.reset(new boost::asio::streambuf);
 	onRead( boost::system::error_code() );
 }
 void Conn::onRead(const boost::system::error_code& error) {
-	if( error ) {
+	if( unlikely(error) ) {
 		log_func("[iproto_conn] %s:%u: read error: %s", ep.address().to_string().c_str(), ep.port(), error.message().c_str() );
 		dismissCallbacks(CB_ERR);
 		if( error != boost::asio::error::operation_aborted ) {
@@ -99,7 +100,7 @@ void Conn::onRead(const boost::system::error_code& error) {
 	while( rd_buf->size() > sizeof(Header) ) {
 		const PacketPtr *buf = boost::asio::buffer_cast< const PacketPtr * >( rd_buf->data() );
 		size_t want_read = sizeof(Header)+buf->hdr.len;
-		if( want_read<=rd_buf->size() ) {
+		if( unlikely(want_read<=rd_buf->size()) ) {
 			invokeCallback(buf->hdr.sync, RequestResult(CB_OK, Packet(buf)) );
 			rd_buf->consume( sizeof(Header) + buf->hdr.len );
 		}else{
@@ -108,15 +109,15 @@ void Conn::onRead(const boost::system::error_code& error) {
 			return;
 		}
 	}
-	if( sock.is_open() )
+	if( likely(sock.is_open()) )
 		boost::asio::async_read(sock, *rd_buf, boost::asio::transfer_at_least(sizeof(Header)-rd_buf->size()),
 			boost::bind(&Conn::onRead, shared_from_this(), boost::asio::placeholders::error) );
 }
 void Conn::ensureWriteBuffer(const boost::system::error_code& error, const char *wr_buf) {
-	if( wr_buf != nullptr )
+	if( likely(wr_buf != nullptr) )
 		::free((void*)wr_buf);
 
-	if( error ) {
+	if( unlikely(error) ) {
 		log_func("[iproto_conn] %s:%u: write error: %s", ep.address().to_string().c_str(), ep.port(), error.message().c_str() );
 		io.post( boost::bind(&Conn::dismissCallbacks, shared_from_this(), CB_ERR) ); //Scared of resume coroutines which already current
 		if( error != boost::asio::error::operation_aborted ) {
@@ -125,7 +126,7 @@ void Conn::ensureWriteBuffer(const boost::system::error_code& error, const char 
 		return;
 	}
 
-	if( write_queue_len>0 && (wr_buf || !write_is_active) ) {
+	if( likely(write_queue_len>0 && (wr_buf || !write_is_active)) ) {
 		const char *wr = write_queue.front();
 		write_queue.pop_front();
 		write_queue_len--;
@@ -143,7 +144,7 @@ bool Conn::dropPacketWrite(Packet &&pkt) {
 	pkt.data=nullptr;
 	write_queue_len++;
 
-	if( checkConnect() ) {
+	if( unlikely(checkConnect()) ) {
 		log_func("[iproto_conn] dropPacketWrite deferred (no connect)");
 		return false;
 	}
@@ -177,7 +178,7 @@ bool Conn::GentleShutdown() {
 	return false;
 }
 void Conn::onTimeout(const boost::system::error_code& error, uint32_t sync) {
-	if( !error ) {
+	if( unlikely(!error) ) {
 		if( LOG_DEBUG )
 			log_func("[iproto_conn] Packet with sync=%u timed out", sync);
 		invokeCallback(sync, RequestResult(CB_TIMEOUT));
@@ -195,11 +196,11 @@ Conn::callbacks_map_type::iterator Conn::invokeCallback(Conn::callbacks_map_type
 	callbacks_map_type::iterator ret_it;
 	auto timer_and_cb = it->second;
 	ret_it = callbacks_map.erase(it);
-	if( timer_and_cb.first ) {
+	if( likely(timer_and_cb.first) ) {
 		timer_and_cb.first->cancel();
 		delete timer_and_cb.first;
 	}
-	if( timer_and_cb.second ) try {
+	if( likely(timer_and_cb.second) ) try {
 		timer_and_cb.second( std::move(req_res) );
 	} catch(std::exception &e) {
 		log_func("[iproto_conn] invokeCallback uncatched exception: %s", e.what() );

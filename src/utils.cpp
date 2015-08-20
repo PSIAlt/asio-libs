@@ -1,5 +1,6 @@
 #include <stdexcept>
 #include <cstdarg>
+#include "perf.hpp"
 #include "utils.hpp"
 
 namespace ASIOLibs {
@@ -30,7 +31,7 @@ std::string hex2bin(const std::string &in) {
 	unsigned s=4;
 	for(size_t i=0, l=0; i<in.size(); i++) {
 		char c = in[i];
-		if     ( c >= '0' && c <= '9' )
+		if     ( likely(c >= '0' && c <= '9') )
 			out[l] |= (c-'0') << s;
 		else if( c >= 'A' && c <= 'F' )
 			out[l] |= (c-'A'+10) << s;
@@ -53,7 +54,7 @@ std::string string_sprintf(const char *fmt, ...) {
 	va_start(args, fmt);
 	while( 1 ) {
 		sz *= 2;
-		if( sz > 4096 ) {
+		if( unlikely(sz > 4096) ) {
 			va_end(args);
 			throw std::overflow_error("string_sprintf: Too long output");
 		}
