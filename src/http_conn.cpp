@@ -22,7 +22,7 @@ extern "C" {
 	setupTimeout( x );
 
 #define TIMEOUT_END() \
-		if( error_code ) { \
+		if( unlikely(error_code) ) { \
 			if( error_code != boost::asio::error::operation_aborted ) \
 				throw boost::system::system_error(error_code); \
 			is_timeout=true; \
@@ -43,6 +43,27 @@ enum {
 	max_read_transfer = 4096*4
 };
 
+static inline void cork_set(int fd) {
+#ifdef TCP_CORK
+	int state = 1;
+	setsockopt(fd, IPPROTO_TCP, TCP_CORK, &state, sizeof(state));
+#elif defined(TCP_NOPUSH)
+	int state = 1;
+	setsockopt(fd, IPPROTO_TCP, TCP_NOPUSH, &state, sizeof(state));
+#else
+#endif
+}
+static inline void cork_clear(int fd) {
+#ifdef TCP_CORK
+	int state = 0;
+	setsockopt(fd, IPPROTO_TCP, TCP_CORK, &state, sizeof(state));
+#elif defined(TCP_NOPUSH)
+	int state = 0;
+	setsockopt(fd, IPPROTO_TCP, TCP_NOPUSH, &state, sizeof(state));
+#else
+#endif
+}
+
 Conn::Conn(boost::asio::yield_context &_yield, boost::asio::io_service &_io,
 		boost::asio::ip::tcp::endpoint &_ep, long _conn_timeout, long _read_timeout)
 		: yield(_yield), ep(_ep), sock(_io), timer(_io), conn_timeout(_conn_timeout),
@@ -60,6 +81,7 @@ void Conn::checkConnect() {
 		sock.async_connect(ep, yield[error_code]);
 		TIMING_STAT_END();
 		TIMEOUT_END();
+		sock.set_option( boost::asio::ip::tcp::no_delay(true) );
 		conn_count++;
 		must_reconnect=false;
 	}
@@ -134,6 +156,7 @@ std::unique_ptr< Response > Conn::DoPostRequest(const char *cmd, const std::stri
 
 	int try_count = 0;
 	boost::system::error_code error_code;
+	cork_set( sock.native_handle() );
 	while( try_count++ < max_send_try ) {
 		checkConnect();
 		writeRequest( req.data(), req.size(), false );
@@ -203,6 +226,7 @@ std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
 	ret->ContentLength = -1;
 	ret->ReadLeft = 0;
 
+	cork_clear( sock.native_handle() );
 	TIMEOUT_START( read_timeout );
 	TIMING_STAT_START("http_read");
 	boost::asio::async_read_until(sock, ret->read_buf, std::string(hdr_end_pattern), yield[error_code]);
@@ -348,6 +372,7 @@ bool Conn::WriteRequestHeaders(const char *cmd, const std::string &uri, size_t C
 	headersCacheCheck();
 	std::string req = ASIOLibs::string_sprintf("%s %s HTTP/1.1\nContent-Length: %zu\n%s",
 		cmd, uri.c_str(), ContentLength, headers_cache.c_str());
+	cork_set( sock.native_handle() );
 	writeRequest( req.data(), req.size(), false );
 	return true;
 } catch (std::exception &e) {

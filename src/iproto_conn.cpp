@@ -79,6 +79,7 @@ void Conn::onConnect(const boost::system::error_code& error) {
 		setupReadHandler();
 		ensureWriteBuffer( boost::system::error_code() );
 	}
+	sock.set_option( boost::asio::ip::tcp::no_delay(true) );
 }
 
 void Conn::setupReadHandler() {
