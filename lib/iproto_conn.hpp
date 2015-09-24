@@ -38,7 +38,7 @@ struct RequestResult {
 
 struct Conn : public std::enable_shared_from_this<Conn> {
 	typedef boost::asio::ip::tcp::socket socktype;
-	typedef std::function< void(RequestResult &&res) > callbacks_func_type;
+	typedef std::function< void(RequestResult res) > callbacks_func_type;
 	typedef std::unordered_map< uint32_t, std::pair<boost::asio::deadline_timer *, callbacks_func_type> > callbacks_map_type;
 
 	Conn(boost::asio::io_service &_io, const boost::asio::ip::tcp::endpoint &_ep,
@@ -55,6 +55,7 @@ struct Conn : public std::enable_shared_from_this<Conn> {
 	bool GentleShutdown();
 	bool checkConnect();
 	void reconnect();
+	void disablePing();
 
 	template <class CompletionToken>
 	RequestResult WriteYield(Packet &&pkt, CompletionToken &&token) { //Template for yield_context
@@ -70,6 +71,8 @@ struct Conn : public std::enable_shared_from_this<Conn> {
 
 private:
 	void beginConnect();
+	void setupPing(const boost::system::error_code& error);
+	void pingCb(RequestResult res);
 	void dismissCallbacks(CB_Result res);
 	void reconnectByTimer(const boost::system::error_code& error);
 	void onConnect(const boost::system::error_code& error);
@@ -83,12 +86,12 @@ private:
 	boost::asio::io_service &io;
 	boost::asio::ip::tcp::endpoint ep;
 	socktype sock;
-	boost::asio::deadline_timer timer; //Timer for various delays etc
+	boost::asio::deadline_timer timer, ping_timer; //Timer for various delays etc
 	std::unique_ptr< boost::asio::streambuf > rd_buf;
 	uint32_t connect_timeout, read_timeout, write_queue_len;
 
 	std::list< const char * > write_queue;
-	bool write_is_active;
+	bool write_is_active, ping_enabled;
 
 	callbacks_map_type callbacks_map;
 };

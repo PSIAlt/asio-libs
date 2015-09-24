@@ -20,12 +20,12 @@ int stderr_printf(char const* format, ...) {
 }
 
 Conn::Conn(boost::asio::io_service &_io, const boost::asio::ip::tcp::endpoint &_ep, uint32_t _connect_timeout, uint32_t _read_timeout)
-	: io(_io), ep(_ep), sock(_io), timer(_io) {
+	: io(_io), ep(_ep), sock(_io), timer(_io), ping_timer(_io) {
 		if( _read_timeout==0 ) _read_timeout=_connect_timeout;
 		connect_timeout=_connect_timeout;
 		read_timeout=_read_timeout;
 		write_queue_len=0;
-		write_is_active=false;
+		write_is_active=ping_enabled=true;
 		log_func = stderr_printf;
 }
 
@@ -35,6 +35,31 @@ Conn::~Conn() {
 
 	if( sock.is_open() ) sock.close();
 	dismissCallbacks(CB_ERR);
+}
+
+void Conn::disablePing() {
+	ping_enabled=false;
+	ping_timer.cancel();
+}
+
+void Conn::setupPing(const boost::system::error_code& error) {
+	if( error || !ping_enabled )
+		return;
+	//Write a ping packet into socket
+	static const IProto::Header hdr{0xff00, 0};
+	static const IProto::PacketPtr pkt{hdr};
+	Write(IProto::Packet(&pkt), boost::bind(&Conn::pingCb, shared_from_this(), _1)  );
+}
+
+void Conn::pingCb(RequestResult res) {
+	if( unlikely(res.code != CB_OK) ) {
+		//Reconnect
+		log_func("[iproto_conn] ping failed, code %u", res.code);
+		reconnect();
+		return;
+	}
+	ping_timer.expires_from_now( boost::posix_time::milliseconds(200) );
+	ping_timer.async_wait( boost::bind(&Conn::setupPing, shared_from_this(), boost::asio::placeholders::error) );
 }
 
 bool Conn::checkConnect() {
@@ -80,6 +105,7 @@ void Conn::onConnect(const boost::system::error_code& error) {
 		ensureWriteBuffer( boost::system::error_code() );
 	}
 	sock.set_option( boost::asio::ip::tcp::no_delay(true) );
+	if( ping_enabled ) setupPing( boost::system::error_code() );
 }
 
 void Conn::setupReadHandler() {
