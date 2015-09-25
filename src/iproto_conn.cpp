@@ -45,6 +45,8 @@ void Conn::disablePing() {
 void Conn::setupPing(const boost::system::error_code& error) {
 	if( error || !ping_enabled )
 		return;
+	if( !sock.is_open() )
+		beginConnect();
 	//Write a ping packet into socket
 	static const IProto::Header hdr{0xff00, 0};
 	static const IProto::PacketPtr pkt{hdr};
@@ -55,10 +57,12 @@ void Conn::pingCb(RequestResult res) {
 	if( unlikely(res.code != CB_OK) ) {
 		//Reconnect
 		log_func("[iproto_conn] ping failed, code %u", res.code);
-		reconnect();
-		return;
+		if( res.code == CB_TIMEOUT ) {
+			reconnect();
+			return;
+		}
 	}
-	ping_timer.expires_from_now( boost::posix_time::milliseconds(200) );
+	ping_timer.expires_from_now( boost::posix_time::milliseconds(300) );
 	ping_timer.async_wait( boost::bind(&Conn::setupPing, shared_from_this(), boost::asio::placeholders::error) );
 }
 
@@ -71,6 +75,7 @@ bool Conn::checkConnect() {
 }
 void Conn::beginConnect() {
 	write_is_active=false;
+	ping_timer.cancel();
 	//Limit connection time
 	timer.expires_from_now( boost::posix_time::milliseconds(connect_timeout) );
 	timer.async_wait( boost::bind(&Conn::reconnectByTimer, shared_from_this(), boost::asio::placeholders::error) );
@@ -82,11 +87,14 @@ void Conn::beginConnect() {
 void Conn::reconnect() {
 	if( likely(sock.is_open()) )
 		sock.close();
+	if( LOG_DEBUG )
+		log_func("[iproto_conn] reconnect");
 	beginConnect();
 }
 void Conn::dismissCallbacks(CB_Result res) {
 	if( LOG_DEBUG )
 		log_func("[iproto_conn] dismissCallbacks");
+	ping_timer.cancel();
 	for(auto it=callbacks_map.begin(); it!=callbacks_map.end(); ) {
 		it = invokeCallback(it, RequestResult(res));
 	}
@@ -102,10 +110,12 @@ void Conn::onConnect(const boost::system::error_code& error) {
 			log_func("[iproto_conn] Connected");
 		timer.cancel();
 		setupReadHandler();
-		ensureWriteBuffer( boost::system::error_code() );
+		sock.set_option( boost::asio::ip::tcp::no_delay(true) );
+		if( ping_enabled )
+			setupPing( boost::system::error_code() );
+		else
+			ensureWriteBuffer( boost::system::error_code() );
 	}
-	sock.set_option( boost::asio::ip::tcp::no_delay(true) );
-	if( ping_enabled ) setupPing( boost::system::error_code() );
 }
 
 void Conn::setupReadHandler() {
@@ -124,10 +134,10 @@ void Conn::onRead(const boost::system::error_code& error) {
 	}
 	if( LOG_DEBUG )
 		log_func("[iproto_conn] onRead rd_buf->size=%zu", rd_buf->size());
-	while( rd_buf->size() > sizeof(Header) ) {
+	while( rd_buf->size() >= sizeof(Header) ) {
 		const PacketPtr *buf = boost::asio::buffer_cast< const PacketPtr * >( rd_buf->data() );
 		size_t want_read = sizeof(Header)+buf->hdr.len;
-		if( unlikely(want_read<=rd_buf->size()) ) {
+		if( want_read <= rd_buf->size() ) {
 			invokeCallback(buf->hdr.sync, RequestResult(CB_OK, Packet(buf)) );
 			rd_buf->consume( sizeof(Header) + buf->hdr.len );
 		}else{
@@ -141,17 +151,26 @@ void Conn::onRead(const boost::system::error_code& error) {
 			boost::bind(&Conn::onRead, shared_from_this(), boost::asio::placeholders::error) );
 }
 void Conn::ensureWriteBuffer(const boost::system::error_code& error, const char *wr_buf) {
-	if( likely(wr_buf != nullptr) )
-		::free((void*)wr_buf);
-
 	if( unlikely(error) ) {
 		log_func("[iproto_conn] %s:%u: write error: %s", ep.address().to_string().c_str(), ep.port(), error.message().c_str() );
 		io.post( boost::bind(&Conn::dismissCallbacks, shared_from_this(), CB_ERR) ); //Scared of resume coroutines which already current
 		if( error != boost::asio::error::operation_aborted ) {
+			if( error == boost::asio::error::broken_pipe ) {
+				//Packet was not completely transfered, we can do a retry
+				write_queue.push_back( wr_buf );
+				write_queue_len++;
+				wr_buf=nullptr;//Prevent free
+			}
 			beginConnect();
+		}else{
+			dismissCallbacks(CB_ERR);
 		}
+		if( likely(wr_buf != nullptr) )
+			::free((void*)wr_buf);
 		return;
 	}
+	if( likely(wr_buf != nullptr) )
+		::free((void*)wr_buf);
 
 	if( likely(write_queue_len>0 && (wr_buf || !write_is_active)) ) {
 		const char *wr = write_queue.front();
