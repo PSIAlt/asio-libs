@@ -56,6 +56,7 @@ struct Conn : public std::enable_shared_from_this<Conn> {
 	bool checkConnect();
 	void reconnect();
 	void disablePing();
+	void close();
 
 	template <class CompletionToken>
 	RequestResult WriteYield(Packet &&pkt, CompletionToken &&token) { //Template for yield_context

@@ -33,8 +33,14 @@ Conn::~Conn() {
 	if( LOG_DEBUG )
 		log_func("[iproto_conn] destructor");
 
-	if( sock.is_open() ) sock.close();
+	close();
 	dismissCallbacks(CB_ERR);
+}
+
+void Conn::close() {
+	boost::system::error_code ec = boost::asio::error::interrupted;
+	for(int i=0; i<3 && sock.is_open() && (!ec || ec == boost::asio::error::interrupted); ++i)
+		sock.close(ec);
 }
 
 void Conn::disablePing() {
@@ -85,8 +91,7 @@ void Conn::beginConnect() {
 		log_func("[iproto_conn] Connecting to %s:%d", ep.address().to_string().c_str(), ep.port() );
 }
 void Conn::reconnect() {
-	if( likely(sock.is_open()) )
-		sock.close();
+	close();
 	if( LOG_DEBUG )
 		log_func("[iproto_conn] reconnect");
 	beginConnect();
@@ -209,8 +214,7 @@ bool Conn::Write(Packet &&pkt, callbacks_func_type &&cb) {
 void Conn::Shutdown() {
 	if( LOG_DEBUG )
 		log_func("[iproto_conn] Shutdown");
-	if( sock.is_open() )
-		sock.close();
+	close();
 	io.post( boost::bind(&Conn::dismissCallbacks, shared_from_this(), CB_ERR) ); //Scared of resume coroutines which already current
 }
 bool Conn::GentleShutdown() {

@@ -91,7 +91,9 @@ void Conn::reconnect() {
 	checkConnect();
 }
 void Conn::close() {
-	if( likely(sock.is_open()) ) sock.close();
+	boost::system::error_code ec = boost::asio::error::interrupted;
+	for(int i=0; i<3 && sock.is_open() && (!ec || ec == boost::asio::error::interrupted); ++i)
+		sock.close(ec);
 }
 void Conn::setupTimeout(long milliseconds) {
 	is_timeout=false;
