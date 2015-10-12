@@ -39,7 +39,7 @@ Conn::~Conn() {
 
 void Conn::close() {
 	boost::system::error_code ec = boost::asio::error::interrupted;
-	for(int i=0; i<3 && sock.is_open() && (!ec || ec == boost::asio::error::interrupted); ++i)
+	for(int i=0; i<3 && sock.is_open() && ec == boost::asio::error::interrupted; ++i)
 		sock.close(ec);
 }
 
