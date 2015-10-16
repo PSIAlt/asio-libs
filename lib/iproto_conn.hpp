@@ -59,9 +59,9 @@ struct Conn : public std::enable_shared_from_this<Conn> {
 	void close();
 
 	template <class CompletionToken>
-	RequestResult WriteYield(Packet &&pkt, CompletionToken &&token) { //Template for yield_context
+	RequestResult WriteYield(Packet &&pkt, CompletionToken &token) { //Template for yield_context
 		typename boost::asio::handler_type< CompletionToken, void(RequestResult) >::type
-			handler( std::forward<CompletionToken>(token) );
+			handler( token );
 
 		boost::asio::async_result<decltype(handler)> result(handler);
 		Write( std::forward<Packet>(pkt), handler);

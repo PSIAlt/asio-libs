@@ -158,7 +158,6 @@ void Conn::onRead(const boost::system::error_code& error) {
 void Conn::ensureWriteBuffer(const boost::system::error_code& error, const char *wr_buf) {
 	if( unlikely(error) ) {
 		log_func("[iproto_conn] %s:%u: write error: %s", ep.address().to_string().c_str(), ep.port(), error.message().c_str() );
-		io.post( boost::bind(&Conn::dismissCallbacks, shared_from_this(), CB_ERR) ); //Scared of resume coroutines which already current
 		if( error != boost::asio::error::operation_aborted ) {
 			if( error == boost::asio::error::broken_pipe ) {
 				//Packet was not completely transfered, we can do a retry
@@ -215,7 +214,7 @@ void Conn::Shutdown() {
 	if( LOG_DEBUG )
 		log_func("[iproto_conn] Shutdown");
 	close();
-	io.post( boost::bind(&Conn::dismissCallbacks, shared_from_this(), CB_ERR) ); //Scared of resume coroutines which already current
+	dismissCallbacks(CB_ERR);
 }
 bool Conn::GentleShutdown() {
 	if( LOG_DEBUG )
@@ -251,7 +250,7 @@ Conn::callbacks_map_type::iterator Conn::invokeCallback(Conn::callbacks_map_type
 		delete timer_and_cb.first;
 	}
 	if( likely(timer_and_cb.second) ) try {
-		timer_and_cb.second( std::move(req_res) );
+		io.post( boost::bind(timer_and_cb.second, std::forward<RequestResult>(req_res)) ); //Scared of resume coroutines which already current
 	} catch(std::exception &e) {
 		log_func("[iproto_conn] invokeCallback uncatched exception: %s", e.what() );
 		abort(); //It's your guilt
