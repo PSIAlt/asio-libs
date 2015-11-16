@@ -31,7 +31,7 @@ Conn::Conn(boost::asio::io_service &_io, const boost::asio::ip::tcp::endpoint &_
 
 Conn::~Conn() {
 	if( LOG_DEBUG )
-		log_func("[iproto_conn] destructor");
+		log_func("[iproto_conn] %s:%u destructor", ep.address().to_string().c_str(), ep.port());
 
 	close();
 	dismissCallbacks(CB_ERR);
@@ -62,7 +62,7 @@ void Conn::setupPing(const boost::system::error_code& error) {
 void Conn::pingCb(RequestResult res) {
 	if( unlikely(res.code != CB_OK) ) {
 		//Reconnect
-		log_func("[iproto_conn] ping failed, code %u", res.code);
+		log_func("[iproto_conn] %s:%u ping failed, code %u", ep.address().to_string().c_str(), ep.port(), res.code);
 		if( res.code == CB_TIMEOUT ) {
 			reconnect();
 			return;
@@ -93,12 +93,12 @@ void Conn::beginConnect() {
 void Conn::reconnect() {
 	close();
 	if( LOG_DEBUG )
-		log_func("[iproto_conn] reconnect");
+		log_func("[iproto_conn] %s:%u reconnect", ep.address().to_string().c_str(), ep.port());
 	beginConnect();
 }
 void Conn::dismissCallbacks(CB_Result res) {
 	if( LOG_DEBUG )
-		log_func("[iproto_conn] dismissCallbacks");
+		log_func("[iproto_conn] %s:%u dismissCallbacks", ep.address().to_string().c_str(), ep.port());
 	ping_timer.cancel();
 	for(auto it=callbacks_map.begin(); it!=callbacks_map.end(); ) {
 		it = invokeCallback(it, RequestResult(res));
@@ -112,7 +112,7 @@ void Conn::reconnectByTimer(const boost::system::error_code& error) {
 void Conn::onConnect(const boost::system::error_code& error) {
 	if( likely(!error) ) {
 		if( LOG_DEBUG )
-			log_func("[iproto_conn] Connected");
+			log_func("[iproto_conn] %s:%u connected", ep.address().to_string().c_str(), ep.port());
 		timer.cancel();
 		setupReadHandler();
 		sock.set_option( boost::asio::ip::tcp::no_delay(true) );
@@ -120,7 +120,8 @@ void Conn::onConnect(const boost::system::error_code& error) {
 			setupPing( boost::system::error_code() );
 		else
 			ensureWriteBuffer( boost::system::error_code() );
-	}
+	}else
+		log_func("[iproto_conn] %s:%u connect failed: %s", ep.address().to_string().c_str(), ep.port(), error.message().c_str() );
 }
 
 void Conn::setupReadHandler() {
@@ -130,15 +131,15 @@ void Conn::setupReadHandler() {
 }
 void Conn::onRead(const boost::system::error_code& error) {
 	if( unlikely(error) ) {
-		log_func("[iproto_conn] %s:%u: read error: %s", ep.address().to_string().c_str(), ep.port(), error.message().c_str() );
+		log_func("[iproto_conn] %s:%u read error: %s", ep.address().to_string().c_str(), ep.port(), error.message().c_str() );
 		dismissCallbacks(CB_ERR);
 		if( error != boost::asio::error::operation_aborted ) {
-			beginConnect();
+			reconnect();
 		}
 		return;
 	}
 	if( LOG_DEBUG )
-		log_func("[iproto_conn] onRead rd_buf->size=%zu", rd_buf->size());
+		log_func("[iproto_conn] %s:%u onRead rd_buf->size=%zu", ep.address().to_string().c_str(), ep.port(), rd_buf->size());
 	while( rd_buf->size() >= sizeof(Header) ) {
 		const PacketPtr *buf = boost::asio::buffer_cast< const PacketPtr * >( rd_buf->data() );
 		size_t want_read = sizeof(Header)+buf->hdr.len;
@@ -157,7 +158,7 @@ void Conn::onRead(const boost::system::error_code& error) {
 }
 void Conn::ensureWriteBuffer(const boost::system::error_code& error, const char *wr_buf) {
 	if( unlikely(error) ) {
-		log_func("[iproto_conn] %s:%u: write error: %s", ep.address().to_string().c_str(), ep.port(), error.message().c_str() );
+		log_func("[iproto_conn] %s:%u write error: %s", ep.address().to_string().c_str(), ep.port(), error.message().c_str() );
 		if( error != boost::asio::error::operation_aborted ) {
 			if( error == boost::asio::error::broken_pipe ) {
 				//Packet was not completely transfered, we can do a retry
@@ -165,7 +166,7 @@ void Conn::ensureWriteBuffer(const boost::system::error_code& error, const char 
 				write_queue_len++;
 				wr_buf=nullptr;//Prevent free
 			}
-			beginConnect();
+			reconnect();
 		}else{
 			dismissCallbacks(CB_ERR);
 		}
@@ -184,7 +185,7 @@ void Conn::ensureWriteBuffer(const boost::system::error_code& error, const char 
 		boost::asio::async_write(sock, boost::asio::buffer(wr, sizeof(*hdr)+hdr->len),
 			boost::bind(&Conn::ensureWriteBuffer, shared_from_this(), boost::asio::placeholders::error, wr) );
 		if( LOG_DEBUG )
-			log_func("[iproto_conn] Write packet sync=%u len=%u", hdr->sync, hdr->len);
+			log_func("[iproto_conn] %s:%u write packet sync=%u len=%u", ep.address().to_string().c_str(), ep.port(), hdr->sync, hdr->len);
 		write_is_active=true;
 	} else
 		write_is_active=false;
@@ -195,7 +196,7 @@ bool Conn::dropPacketWrite(Packet &&pkt) {
 	write_queue_len++;
 
 	if( unlikely(checkConnect()) ) {
-		log_func("[iproto_conn] dropPacketWrite deferred (no connect)");
+		log_func("[iproto_conn] %s:%u dropPacketWrite deferred (no connect)", ep.address().to_string().c_str(), ep.port());
 		return false;
 	}
 
@@ -212,13 +213,13 @@ bool Conn::Write(Packet &&pkt, callbacks_func_type &&cb) {
 }
 void Conn::Shutdown() {
 	if( LOG_DEBUG )
-		log_func("[iproto_conn] Shutdown");
+		log_func("[iproto_conn] %s:%u shutdown", ep.address().to_string().c_str(), ep.port());
 	close();
 	dismissCallbacks(CB_ERR);
 }
 bool Conn::GentleShutdown() {
 	if( LOG_DEBUG )
-		log_func("[iproto_conn] GentleShutdown");
+		log_func("[iproto_conn] %s:%u GentleShutdown", ep.address().to_string().c_str(), ep.port());
 
 	if( callbacks_map.empty() && !write_is_active ) {
 		Shutdown();
@@ -229,7 +230,7 @@ bool Conn::GentleShutdown() {
 void Conn::onTimeout(const boost::system::error_code& error, uint32_t sync) {
 	if( unlikely(!error) ) {
 		if( LOG_DEBUG )
-			log_func("[iproto_conn] Packet with sync=%u timed out", sync);
+			log_func("[iproto_conn] %s:%u Packet with sync=%u timed out", ep.address().to_string().c_str(), ep.port(), sync);
 		invokeCallback(sync, RequestResult(CB_TIMEOUT));
 	}
 }
@@ -240,7 +241,7 @@ void Conn::invokeCallback(uint32_t sync, RequestResult &&req_res) {
 }
 Conn::callbacks_map_type::iterator Conn::invokeCallback(Conn::callbacks_map_type::iterator it, RequestResult &&req_res) {
 	if( LOG_DEBUG )
-		log_func("[iproto_conn] invokeCallback sync=%u res.code=%u", it->first, req_res.code);
+		log_func("[iproto_conn] %s:%u invokeCallback sync=%u res.code=%u", ep.address().to_string().c_str(), ep.port(), it->first, req_res.code);
 
 	callbacks_map_type::iterator ret_it;
 	auto timer_and_cb = it->second;
@@ -252,7 +253,7 @@ Conn::callbacks_map_type::iterator Conn::invokeCallback(Conn::callbacks_map_type
 	if( likely(timer_and_cb.second) ) try {
 		io.post( boost::bind(timer_and_cb.second, std::forward<RequestResult>(req_res)) ); //Scared of resume coroutines which already current
 	} catch(std::exception &e) {
-		log_func("[iproto_conn] invokeCallback uncatched exception: %s", e.what() );
+		log_func("[iproto_conn] %s:%u invokeCallback uncatched exception: %s", ep.address().to_string().c_str(), ep.port(), e.what() );
 		abort(); //It's your guilt
 	}
 	return ret_it;
