@@ -80,9 +80,9 @@ private:
 	void setupReadHandler();
 	void ensureWriteBuffer(const boost::system::error_code& error, const char *wr_buf = nullptr);
 	void onRead(const boost::system::error_code& error);
-	void onTimeout(const boost::system::error_code& error, uint32_t sync);
+	void onTimeout(const boost::system::error_code& error, uint32_t sync, boost::asio::deadline_timer *timer);
 	void invokeCallback(uint32_t sync, RequestResult &&req_res);
-	callbacks_map_type::iterator invokeCallback(callbacks_map_type::iterator it, RequestResult &&req_res);
+	callbacks_map_type::iterator invokeCallback(callbacks_map_type::iterator &it, RequestResult &&req_res);
 
 	boost::asio::io_service &io;
 	boost::asio::ip::tcp::endpoint ep;

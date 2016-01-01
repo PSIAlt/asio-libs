@@ -206,7 +206,7 @@ bool Conn::dropPacketWrite(Packet &&pkt) {
 bool Conn::Write(Packet &&pkt, callbacks_func_type &&cb) {
 	auto timer = new boost::asio::deadline_timer(io);
 	timer->expires_from_now( boost::posix_time::milliseconds(read_timeout) );
-	timer->async_wait( boost::bind(&Conn::onTimeout, shared_from_this(), boost::asio::placeholders::error, pkt.hdr.sync) );
+	timer->async_wait( boost::bind(&Conn::onTimeout, shared_from_this(), boost::asio::placeholders::error, pkt.hdr.sync, timer) );
 
 	callbacks_map[pkt.hdr.sync] = std::make_pair(timer, std::forward<callbacks_func_type>(cb));
 	return dropPacketWrite( std::forward<Packet>(pkt) );
@@ -227,36 +227,36 @@ bool Conn::GentleShutdown() {
 	}
 	return false;
 }
-void Conn::onTimeout(const boost::system::error_code& error, uint32_t sync) {
+void Conn::onTimeout(const boost::system::error_code& error, uint32_t sync, boost::asio::deadline_timer *timer) {
 	if( unlikely(!error) ) {
 		if( LOG_DEBUG )
 			log_func("[iproto_conn] %s:%u Packet with sync=%u timed out", ep.address().to_string().c_str(), ep.port(), sync);
 		invokeCallback(sync, RequestResult(CB_TIMEOUT));
 	}
+	delete timer;
 }
 void Conn::invokeCallback(uint32_t sync, RequestResult &&req_res) {
 	auto it = callbacks_map.find(sync);
 	if( it != callbacks_map.end() )
 		invokeCallback(it, std::forward<RequestResult>(req_res));
 }
-Conn::callbacks_map_type::iterator Conn::invokeCallback(Conn::callbacks_map_type::iterator it, RequestResult &&req_res) {
+Conn::callbacks_map_type::iterator Conn::invokeCallback(Conn::callbacks_map_type::iterator &it, RequestResult &&req_res) try {
 	if( LOG_DEBUG )
 		log_func("[iproto_conn] %s:%u invokeCallback sync=%u res.code=%u", ep.address().to_string().c_str(), ep.port(), it->first, req_res.code);
 
 	callbacks_map_type::iterator ret_it;
-	auto timer_and_cb = it->second;
+	auto timer_and_cb = std::move(it->second); //Move to reduce inc/dec of shared_ptrs
 	ret_it = callbacks_map.erase(it);
-	if( likely(timer_and_cb.first) ) {
+	if( likely(timer_and_cb.first && req_res.code!=CB_TIMEOUT) )
 		timer_and_cb.first->cancel();
-		delete timer_and_cb.first;
-	}
-	if( likely(timer_and_cb.second) ) try {
-		io.post( boost::bind(timer_and_cb.second, std::forward<RequestResult>(req_res)) ); //Scared of resume coroutines which already current
-	} catch(std::exception &e) {
-		log_func("[iproto_conn] %s:%u invokeCallback uncatched exception: %s", ep.address().to_string().c_str(), ep.port(), e.what() );
-		abort(); //It's your guilt
-	}
+
+	if( likely(timer_and_cb.second) )
+		//Post in separate job to avoid call in current coroutine and/or other shitty accidents
+		io.post( boost::bind(std::move(timer_and_cb.second), std::forward<RequestResult>(req_res)) );
 	return ret_it;
+} catch(std::exception &e) {
+	log_func("[iproto_conn] %s:%u invokeCallback uncatched exception: %s", ep.address().to_string().c_str(), ep.port(), e.what() );
+	abort(); //It's your guilt
 }
 
 };
