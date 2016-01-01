@@ -128,6 +128,9 @@ private:
   caller_type& ca_;
   Handler& handler_;
   boost::system::error_code* ec_;
+
+  std::function< void() > onYield;
+  std::function< void() > onResume;
 };
 
 #if defined(GENERATING_DOCUMENTATION)
@@ -262,6 +265,8 @@ void spawn(boost::asio::io_service& io_service,
 
 #include <boost/asio/detail/pop_options.hpp>
 
-#include <boost/asio/impl/spawn.hpp>
+#include <impl_callbacked_spawn.hpp>
 
+#else // BOOST_ASIO_SPAWN_HPP
+#error Too late to include callbacked_spawn.hpp (original asio/spawn.hpp is already included) !
 #endif // BOOST_ASIO_SPAWN_HPP
