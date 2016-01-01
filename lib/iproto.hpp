@@ -28,7 +28,7 @@ struct PacketPtr {
 struct Packet {
 	Packet() : data(nullptr), ofs(0) {};
 	~Packet() {
-		delete[] data;
+		free(data);
 		data = nullptr;
 	}
 	Packet(Header &&_hdr) : hdr(_hdr), data(nullptr), ofs(0) {};
