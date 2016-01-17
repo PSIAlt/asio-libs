@@ -39,7 +39,7 @@ struct RequestResult {
 struct Conn : public std::enable_shared_from_this<Conn> {
 	typedef boost::asio::ip::tcp::socket socktype;
 	typedef std::function< void(RequestResult res) > callbacks_func_type;
-	typedef std::unordered_map< uint32_t, std::pair<boost::asio::deadline_timer *, callbacks_func_type> > callbacks_map_type;
+	typedef std::unordered_map< uint32_t, std::pair< std::shared_ptr<boost::asio::deadline_timer>, callbacks_func_type> > callbacks_map_type;
 
 	Conn(boost::asio::io_service &_io, const boost::asio::ip::tcp::endpoint &_ep,
 		uint32_t _connect_timeout=1000, uint32_t _read_timeout=0); //timeouts are in milliseconds
@@ -80,7 +80,7 @@ private:
 	void setupReadHandler();
 	void ensureWriteBuffer(const boost::system::error_code& error, const char *wr_buf = nullptr);
 	void onRead(const boost::system::error_code& error);
-	void onTimeout(const boost::system::error_code& error, uint32_t sync, boost::asio::deadline_timer *timer);
+	void onTimeout(const boost::system::error_code& error, uint32_t sync, std::shared_ptr< boost::asio::deadline_timer > timer);
 	void invokeCallback(uint32_t sync, RequestResult &&req_res);
 	callbacks_map_type::iterator invokeCallback(callbacks_map_type::iterator &it, RequestResult &&req_res);
 

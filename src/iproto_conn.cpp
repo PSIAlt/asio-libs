@@ -204,11 +204,11 @@ bool Conn::dropPacketWrite(Packet &&pkt) {
 	return true;
 }
 bool Conn::Write(Packet &&pkt, callbacks_func_type &&cb) {
-	auto timer = new boost::asio::deadline_timer(io);
+	auto timer = std::make_shared< boost::asio::deadline_timer >(io);
 	timer->expires_from_now( boost::posix_time::milliseconds(read_timeout) );
 	timer->async_wait( boost::bind(&Conn::onTimeout, shared_from_this(), boost::asio::placeholders::error, pkt.hdr.sync, timer) );
 
-	callbacks_map[pkt.hdr.sync] = std::make_pair(timer, std::forward<callbacks_func_type>(cb));
+	callbacks_map[pkt.hdr.sync] = std::make_pair(std::move(timer), std::forward<callbacks_func_type>(cb));
 	return dropPacketWrite( std::forward<Packet>(pkt) );
 }
 void Conn::Shutdown() {
@@ -227,13 +227,12 @@ bool Conn::GentleShutdown() {
 	}
 	return false;
 }
-void Conn::onTimeout(const boost::system::error_code& error, uint32_t sync, boost::asio::deadline_timer *timer) {
+void Conn::onTimeout(const boost::system::error_code& error, uint32_t sync, std::shared_ptr< boost::asio::deadline_timer > timer) {
 	if( unlikely(!error) ) {
 		if( LOG_DEBUG )
 			log_func("[iproto_conn] %s:%u Packet with sync=%u timed out", ep.address().to_string().c_str(), ep.port(), sync);
 		invokeCallback(sync, RequestResult(CB_TIMEOUT));
 	}
-	delete timer;
 }
 void Conn::invokeCallback(uint32_t sync, RequestResult &&req_res) {
 	auto it = callbacks_map.find(sync);

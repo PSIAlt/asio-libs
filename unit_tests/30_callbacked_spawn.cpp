@@ -6,8 +6,6 @@
 #include <boost/bind.hpp>
 #include <boost/asio.hpp>
 #include <callbacked_spawn.hpp>
-#include "http_conn.hpp"
-#include "stopwatch.hpp"
 
 using namespace std;
 boost::asio::io_service io;
