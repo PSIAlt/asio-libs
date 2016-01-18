@@ -136,6 +136,8 @@ void Conn::onRead(const boost::system::error_code& error) {
 		}
 		return;
 	}
+	if( unlikely(!rd_buf) )
+		rd_buf.reset(new boost::asio::streambuf);
 	if( LOG_DEBUG )
 		log_func("[iproto_conn] %s:%u onRead rd_buf->size=%zu", ep.address().to_string().c_str(), ep.port(), rd_buf->size());
 	while( rd_buf->size() >= sizeof(Header) ) {
