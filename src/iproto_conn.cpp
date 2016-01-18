@@ -125,8 +125,6 @@ void Conn::onConnect(const boost::system::error_code& error) {
 }
 
 void Conn::setupReadHandler() {
-	if( likely(!rd_buf || rd_buf->size()==0) )
-		rd_buf.reset(new boost::asio::streambuf);
 	onRead( boost::system::error_code() );
 }
 void Conn::onRead(const boost::system::error_code& error) {
