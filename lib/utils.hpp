@@ -13,6 +13,7 @@ namespace ASIOLibs {
 
 struct ScopeGuard {
 	typedef std::function< void() > func_type;
+	//TODO make perfect forwarding?
 	explicit ScopeGuard(func_type _func) : func(_func), isReleased(false) {}
 	~ScopeGuard() {
 		if( !isReleased && func ) try {

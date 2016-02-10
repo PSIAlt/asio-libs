@@ -228,7 +228,7 @@ bool Conn::GentleShutdown() {
 	return false;
 }
 void Conn::onTimeout(const boost::system::error_code& error, uint32_t sync, std::shared_ptr< boost::asio::deadline_timer > timer) {
-	if( unlikely(!error) ) {
+	if( unlikely(!error && timer) ) {
 		if( LOG_DEBUG )
 			log_func("[iproto_conn] %s:%u Packet with sync=%u timed out", ep.address().to_string().c_str(), ep.port(), sync);
 		invokeCallback(sync, RequestResult(CB_TIMEOUT));
