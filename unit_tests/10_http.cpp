@@ -157,8 +157,9 @@ TEST_CASE( "HTTP GET timeouts tests", "[get]" ) {
 	}
 }
 TEST_CASE( "HTTP lowlevel api", "[get]" ) {
-	ASIOLibs::HTTP::Conn c( *yield, io, ep ); //Should be connect timeout
+	ASIOLibs::HTTP::Conn c( *yield, io, ep, 1000, 10000 );
 	c.Headers()["Host"] = "forsakens.ru";
+
 	c.WriteRequestHeaders("GET", "/test/503");
 	auto r0 = c.ReadAnswer();
 	REQUIRE( r0->status == 503 );
