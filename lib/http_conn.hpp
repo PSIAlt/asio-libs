@@ -30,11 +30,8 @@ namespace HTTP {
 - streaming GET support
 */
 
-struct Timeout : public std::runtime_error {
-	Timeout(const std::string &s) : std::runtime_error(s) {}; 
-};
-
 struct Conn;
+
 struct Response {
 	ssize_t ContentLength;
 	size_t ReadLeft;
@@ -104,6 +101,7 @@ struct Conn {
 	size_t WriteTee(boost::asio::ip::tcp::socket &sock_from, size_t max_bytes);
 	size_t WriteSplice(boost::asio::ip::tcp::socket &sock_from, size_t max_bytes);
 	std::unique_ptr< Response > ReadAnswer(bool read_body=true);
+	const boost::asio::ip::tcp::endpoint &endpoint() const { return ep; }
 
 private:
 	void setupTimeout(long milliseconds);
@@ -124,6 +122,26 @@ private:
 
 	std::map< std::string, std::string > headers;
 	std::string headers_cache;
+};
+
+struct Error : public std::runtime_error {
+	enum ErrorTypes {
+		T_TIMEOUT,
+		T_EXCEPTION,
+		T_RESPONSE
+	};
+	Error(const std::string &s, Conn *_conn, ErrorTypes _t)
+		: std::runtime_error(s), conn(_conn), t(_t) {
+			if( conn )
+				ep = conn->endpoint();
+		};
+	ErrorTypes getType() const { return t; }
+	const Conn *getConn() const { return conn; } //Do not use if Conn is already destroyed
+	const boost::asio::ip::tcp::endpoint &getEndpoint() const { return ep; }
+private:
+	Conn *conn;
+	ErrorTypes t;
+	boost::asio::ip::tcp::endpoint ep;
 };
 
 };};

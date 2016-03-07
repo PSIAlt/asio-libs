@@ -28,7 +28,7 @@ extern "C" {
 #define TIMEOUT_END() \
 		if( unlikely(error_code) ) { \
 			if( error_code != boost::asio::error::operation_aborted ) \
-				throw boost::system::system_error(error_code); \
+				throw Error(boost::system::system_error(error_code).what(), this, Error::ErrorTypes::T_EXCEPTION); \
 			is_timeout=true; \
 		} \
 		checkTimeout();
@@ -115,7 +115,7 @@ void Conn::onTimeout(const boost::system::error_code &ec) {
 void Conn::checkTimeout() {
 	if( unlikely(is_timeout) ) {
 		close();
-		throw Timeout( "ASIOLibs::HTTP::Conn: Timeout while requesting " + ep.address().to_string() );
+		throw Error( "ASIOLibs::HTTP::Conn: Timeout", this, Error::ErrorTypes::T_TIMEOUT );
 	}
 }
 
@@ -178,18 +178,18 @@ std::unique_ptr< Response > Conn::DoPostRequest(const char *cmd, const std::stri
 			boost::asio::async_write(sock, boost::asio::buffer(postdata, postlen), yield[error_code]);
 			TIMING_STAT_END();
 			if( unlikely(!can_recall && error_code) )
-				throw boost::system::system_error(error_code);
+				throw Error(boost::system::system_error(error_code).what(), this, Error::ErrorTypes::T_EXCEPTION);
 			if( unlikely(error_code) )
 				break;
 		}
 		if( unlikely(error_code == boost::asio::error::operation_aborted) )
-			throw boost::system::system_error(error_code);
+			throw Error(boost::system::system_error(error_code).what(), this, Error::ErrorTypes::T_EXCEPTION);
 		if( likely(!error_code) )
 			return ReadAnswer(true);
 		if( unlikely(sock.is_open()) ) //Dunno wtf happend, just reconnect
 			reconnect();
 	}
-	throw boost::system::system_error(error_code);
+	throw Error(boost::system::system_error(error_code).what(), this, Error::ErrorTypes::T_EXCEPTION);
 }
 
 std::unique_ptr< Response > Conn::POST(const std::string &uri, const char *postdata, size_t postlen, const char *cmd) {
@@ -224,7 +224,7 @@ void Conn::writeRequest(const char *buf, size_t sz, bool wait_read) {
 		if( unlikely(sock.is_open()) ) //Dunno wtf happend, just reconnect
 			reconnect();
 	}
-	throw boost::system::system_error(error_code);
+	throw Error(boost::system::system_error(error_code).what(), this, Error::ErrorTypes::T_EXCEPTION);
 }
 
 std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
@@ -247,7 +247,7 @@ std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
 	DEBUG("ReadAnswer: " << std::string(data, sz));
 	const char *hdr_end = (const char *)memmem(data, sz, hdr_end_pattern, sizeof(hdr_end_pattern)-1);
 	if( unlikely(!hdr_end) )
-		throw std::runtime_error("Cant find headers end");
+		throw Error("Cant find headers end", this, Error::ErrorTypes::T_RESPONSE);
 
 	//Parse respnse status
 	struct phr_header headers[100];
@@ -258,7 +258,7 @@ std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
 	int pret = phr_parse_response(data, hdr_end-data+sizeof(hdr_end_pattern)-1, &minor_version, &ret->status, &msg, &msg_len, headers, &num_headers, 0);
 
 	if( unlikely(pret != -2 && pret <= 0) )
-		throw std::runtime_error("Cant parse http response: " + std::to_string(pret));
+		throw Error("Cant parse http response: " + std::to_string(pret), this, Error::ErrorTypes::T_RESPONSE);
 
 	bool l_must_reconnect = true;
 	for(size_t i=0; i < num_headers; i++) {
@@ -367,7 +367,7 @@ void Conn::StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip:
 	while( resp->ReadLeft > 0 ) {
 		ssize_t rd = splice( sock.native_handle(), NULL, dest.native_handle(), NULL, resp->ReadLeft, SPLICE_F_MOVE | SPLICE_F_NONBLOCK | SPLICE_F_MORE);
 		if( unlikely(rd == -1 && errno != EAGAIN) )
-			throw std::runtime_error( std::string("splice() failed: ") + strerror(errno) );
+			throw Error(std::string("splice() failed: ") + strerror(errno), this, Error::ErrorTypes::T_EXCEPTION);
 		else if( rd < 1 ) {
 			{
 				TIMEOUT_START( read_timeout );
@@ -426,7 +426,7 @@ size_t Conn::WriteTee(boost::asio::ip::tcp::socket &sock_from, size_t max_bytes)
 	TIMING_STAT_END();
 	ssize_t wr = tee(sock_from.native_handle(), sock.native_handle(), max_bytes, SPLICE_F_MORE | SPLICE_F_NONBLOCK);
 	if( unlikely(wr == -1) )
-		throw std::runtime_error( std::string("tee() failed: ") + strerror(errno) );
+		throw Error(std::string("tee() failed: ") + strerror(errno), this, Error::ErrorTypes::T_EXCEPTION);
 	return wr;
 #endif
 }
@@ -440,7 +440,7 @@ size_t Conn::WriteSplice(boost::asio::ip::tcp::socket &sock_from, size_t max_byt
 	while( max_bytes > wr_total ) {
 		ssize_t wr = splice( sock_from.native_handle(), NULL, sock.native_handle(), NULL, max_bytes-wr_total, SPLICE_F_MOVE | SPLICE_F_NONBLOCK | SPLICE_F_MORE);
 		if( unlikely(wr == -1 && errno != EAGAIN) )
-			throw std::runtime_error( std::string("splice() failed: ") + strerror(errno) );
+			throw Error(std::string("splice() failed: ") + strerror(errno), this, Error::ErrorTypes::T_EXCEPTION);
 		else if( wr < 1 ) {
 			{
 				TIMEOUT_START( read_timeout );

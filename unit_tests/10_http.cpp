@@ -139,8 +139,9 @@ TEST_CASE( "HTTP GET timeouts tests", "[get]" ) {
 		bool was_timeout = false;
 		try {
 			auto r0 = c.GET("/Pg-hstore-1.01.tar.gz");
-		}catch(ASIOLibs::HTTP::Timeout &e) {
-			was_timeout = true;
+		}catch(ASIOLibs::HTTP::Error &e) {
+			if( e.getType() == ASIOLibs::HTTP::Error::ErrorTypes::T_TIMEOUT )
+				was_timeout = true;
 		}
 		REQUIRE( was_timeout == true );
 	}
@@ -150,8 +151,9 @@ TEST_CASE( "HTTP GET timeouts tests", "[get]" ) {
 		bool was_timeout = false;
 		try {
 			auto r0 = c.GET("/Pg-hstore-1.01.tar.gz");
-		}catch(ASIOLibs::HTTP::Timeout &e) {
-			was_timeout = true;
+		}catch(ASIOLibs::HTTP::Error &e) {
+			if( e.getType() == ASIOLibs::HTTP::Error::ErrorTypes::T_TIMEOUT )
+				was_timeout = true;
 		}
 		REQUIRE( was_timeout == true );
 	}
