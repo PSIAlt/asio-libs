@@ -125,9 +125,9 @@ void Conn::onConnect(const boost::system::error_code& error) {
 }
 
 void Conn::setupReadHandler() {
-	onRead( boost::system::error_code() );
+	onRead( boost::system::error_code(), std::make_shared< boost::asio::streambuf >() );
 }
-void Conn::onRead(const boost::system::error_code& error) {
+void Conn::onRead(const boost::system::error_code& error, std::shared_ptr< boost::asio::streambuf > rd_buf) {
 	if( unlikely(error) ) {
 		log_func("[iproto_conn] %s:%u read error: %s", ep.address().to_string().c_str(), ep.port(), error.message().c_str() );
 		dismissCallbacks(CB_ERR);
@@ -142,19 +142,25 @@ void Conn::onRead(const boost::system::error_code& error) {
 		log_func("[iproto_conn] %s:%u onRead rd_buf->size=%zu", ep.address().to_string().c_str(), ep.port(), rd_buf->size());
 	while( rd_buf->size() >= sizeof(Header) ) {
 		const PacketPtr *buf = boost::asio::buffer_cast< const PacketPtr * >( rd_buf->data() );
+		if( LOG_DEBUG )
+			log_func("[iproto_conn] %s:%u onRead buffer iproto packet hdr: len=%u sync=%u msg=%u", ep.address().to_string().c_str(), ep.port(),
+				buf->hdr.len, buf->hdr.sync, buf->hdr.msg);
 		size_t want_read = sizeof(Header)+buf->hdr.len;
 		if( want_read <= rd_buf->size() ) {
 			invokeCallback(buf->hdr.sync, RequestResult(CB_OK, Packet(buf)) );
 			rd_buf->consume( sizeof(Header) + buf->hdr.len );
 		}else{
-			boost::asio::async_read(sock, *rd_buf, boost::asio::transfer_at_least(want_read - rd_buf->size()),
-				boost::bind(&Conn::onRead, shared_from_this(), boost::asio::placeholders::error) );
+			size_t rd = want_read - rd_buf->size();
+			if( LOG_DEBUG )
+				log_func("[iproto_conn] %s:%u onRead want_read=%zu", ep.address().to_string().c_str(), ep.port(), rd);
+			boost::asio::async_read(sock, *rd_buf, boost::asio::transfer_at_least(rd),
+				boost::bind(&Conn::onRead, shared_from_this(), boost::asio::placeholders::error, rd_buf) );
 			return;
 		}
 	}
 	if( likely(sock.is_open()) )
 		boost::asio::async_read(sock, *rd_buf, boost::asio::transfer_at_least(sizeof(Header)-rd_buf->size()),
-			boost::bind(&Conn::onRead, shared_from_this(), boost::asio::placeholders::error) );
+			boost::bind(&Conn::onRead, shared_from_this(), boost::asio::placeholders::error, rd_buf) );
 }
 void Conn::ensureWriteBuffer(const boost::system::error_code& error, const char *wr_buf) {
 	if( unlikely(error) ) {
@@ -238,6 +244,8 @@ void Conn::invokeCallback(uint32_t sync, RequestResult &&req_res) {
 	auto it = callbacks_map.find(sync);
 	if( it != callbacks_map.end() )
 		invokeCallback(it, std::forward<RequestResult>(req_res));
+	else if( LOG_DEBUG )
+		log_func("[iproto_conn] %s:%u invokeCallback: Packet with sync=%u not found", ep.address().to_string().c_str(), ep.port(), sync);
 }
 Conn::callbacks_map_type::iterator Conn::invokeCallback(Conn::callbacks_map_type::iterator &it, RequestResult &&req_res) try {
 	if( LOG_DEBUG )

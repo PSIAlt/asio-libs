@@ -79,7 +79,7 @@ private:
 	void onConnect(const boost::system::error_code& error);
 	void setupReadHandler();
 	void ensureWriteBuffer(const boost::system::error_code& error, const char *wr_buf = nullptr);
-	void onRead(const boost::system::error_code& error);
+	void onRead(const boost::system::error_code& error, std::shared_ptr< boost::asio::streambuf > rd_buf);
 	void onTimeout(const boost::system::error_code& error, uint32_t sync, std::shared_ptr< boost::asio::deadline_timer > timer);
 	void invokeCallback(uint32_t sync, RequestResult &&req_res);
 	callbacks_map_type::iterator invokeCallback(callbacks_map_type::iterator &it, RequestResult &&req_res);
@@ -88,7 +88,6 @@ private:
 	boost::asio::ip::tcp::endpoint ep;
 	socktype sock;
 	boost::asio::deadline_timer timer, ping_timer; //Timer for various delays etc
-	std::unique_ptr< boost::asio::streambuf > rd_buf;
 	uint32_t connect_timeout, read_timeout, write_queue_len;
 
 	std::list< const char * > write_queue;
