@@ -52,6 +52,7 @@ private:
 struct Conn {
 	Conn(boost::asio::yield_context &_yield, boost::asio::io_service &_io,
 		boost::asio::ip::tcp::endpoint &_ep, long _conn_timeout=1000, long _read_timeout=5000);
+	~Conn();
 
 	void checkConnect();
 	void reconnect();
@@ -105,8 +106,8 @@ struct Conn {
 
 private:
 	void setupTimeout(long milliseconds);
-	void onTimeout(const boost::system::error_code &ec);
-	void checkTimeout();
+	void onTimeout(const boost::system::error_code &ec, std::shared_ptr<boost::asio::deadline_timer> timer_);
+	void checkTimeout(const boost::system::error_code &ec);
 
 	void writeRequest(const char *buf, size_t sz, bool wait_read );
 
@@ -115,9 +116,9 @@ private:
 	boost::asio::yield_context &yield;
 	boost::asio::ip::tcp::endpoint ep;
 	boost::asio::ip::tcp::socket sock;
-	boost::asio::deadline_timer timer;
+	std::shared_ptr<boost::asio::deadline_timer> timer;
 	long conn_timeout, read_timeout, conn_count;
-	bool is_timeout, headers_cache_clear, must_reconnect;
+	bool headers_cache_clear, must_reconnect;
 	TimingStat *stat;
 
 	std::map< std::string, std::string > headers;

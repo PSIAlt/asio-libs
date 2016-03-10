@@ -17,30 +17,25 @@ extern "C" {
 #include "picohttpparser.h"
 };
 
+#define IS_TIMER_TIMEOUT(t) (t->expires_from_now() <= boost::posix_time::milliseconds(0))
+
 #define TIMEOUT_START(x) \
 	boost::system::error_code error_code; \
 	setupTimeout( x ); \
 	ASIOLibs::ScopeGuard _timer_guard( [this]{ \
-		is_timeout=true; \
-		timer.cancel(); \
+		setupTimeout(0); \
 	});
 
-#define TIMEOUT_END() \
-		if( unlikely(error_code) ) { \
-			if( error_code != boost::asio::error::operation_aborted ) \
-				throw Error(boost::system::system_error(error_code).what(), this, Error::ErrorTypes::T_EXCEPTION); \
-			is_timeout=true; \
-		} \
-		checkTimeout();
+#define TIMEOUT_END() checkTimeout(error_code);
 
 #define TIMING_STAT_START(name) \
-		{ \
-		std::unique_ptr<StopWatch> sw; \
-		if( stat ) \
-			sw.reset( new StopWatch(name, stat) );
+	{ \
+	std::unique_ptr<StopWatch> sw; \
+	if( stat ) \
+		sw.reset( new StopWatch(name, stat) );
 
 #define TIMING_STAT_END() \
-		}
+	}
 
 enum {
 	max_send_try = 5,
@@ -70,11 +65,15 @@ static inline void cork_clear(int fd) {
 
 Conn::Conn(boost::asio::yield_context &_yield, boost::asio::io_service &_io,
 		boost::asio::ip::tcp::endpoint &_ep, long _conn_timeout, long _read_timeout)
-		: yield(_yield), ep(_ep), sock(_io), timer(_io), conn_timeout(_conn_timeout),
-			read_timeout(_read_timeout), conn_count(0), is_timeout(false), headers_cache_clear(true),
+		: yield(_yield), ep(_ep), sock(_io), timer( std::make_shared<boost::asio::deadline_timer>(_io) ), conn_timeout(_conn_timeout),
+			read_timeout(_read_timeout), conn_count(0), headers_cache_clear(true),
 			must_reconnect(true), stat(nullptr) {
 	headers["User-Agent"] = "ASIOLibs " ASIOLIBS_VERSION;
 	headers["Connection"] = "Keep-Alive";
+}
+
+Conn::~Conn() {
+	setupTimeout(0);
 }
 
 void Conn::checkConnect() {
@@ -102,18 +101,29 @@ void Conn::close() {
 		sock.close(ec);
 }
 void Conn::setupTimeout(long milliseconds) {
-	is_timeout=false;
-	timer.expires_from_now( boost::posix_time::milliseconds( milliseconds ) );
-	timer.async_wait( boost::bind(&Conn::onTimeout, this, boost::asio::placeholders::error) );
-}
-void Conn::onTimeout(const boost::system::error_code &ec) {
-	if( likely(!ec && !is_timeout && timer.expires_from_now() <= boost::posix_time::seconds(0)) ) {
-		close();
-		is_timeout=true;
+	if( milliseconds==0 ) {
+		// set big time to prevent IS_TIMER_TIMEOUT from give us true value on handler races
+		timer->expires_from_now( boost::posix_time::seconds(120) );
+		timer->cancel();
+	}else{
+		timer->expires_from_now( boost::posix_time::milliseconds( milliseconds ) );
+		timer->async_wait( boost::bind(&Conn::onTimeout, this, boost::asio::placeholders::error, timer) );
 	}
 }
-void Conn::checkTimeout() {
-	if( unlikely(is_timeout) ) {
+void Conn::onTimeout(const boost::system::error_code &ec, std::shared_ptr<boost::asio::deadline_timer> timer_) {
+	/* Check ec for error & check expires_from_now() with IS_TIMER_TIMEOUT macro
+	to ensure its expired, not canceled: there is possible RC when timeout was queued into asio,
+	and then Conn destroyed for different reason. This is possible UB because timer already destroyed(and Conn too),
+	but handler with good error is alive. For this cases each cancel() and ~Conn do call setupTimeout(0)
+	to make IS_TIMER_TIMEOUT detect forced cancel
+	*/
+	if( likely(!ec && IS_TIMER_TIMEOUT(timer_)) )
+		close();
+}
+void Conn::checkTimeout(const boost::system::error_code &ec) {
+	if( unlikely(ec) ) {
+		if( !IS_TIMER_TIMEOUT(timer) && ec != boost::asio::error::operation_aborted )
+			throw Error(boost::system::system_error(ec).what(), this, Error::ErrorTypes::T_EXCEPTION);
 		close();
 		throw Error( "ASIOLibs::HTTP::Conn: Timeout", this, Error::ErrorTypes::T_TIMEOUT );
 	}
