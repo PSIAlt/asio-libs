@@ -35,9 +35,6 @@ all: depend $(addprefix $(OBJDIR), $(OBJS))
 $(OBJDIR)picohttpparser.o: $(SRCDIR)picohttpparser.c
 	$(CC) $(CFLAGS) -c -o $@ $< 
 
-tests: $(addprefix $(TESTDIR), main.cpp) $(addprefix $(OBJDIR), $(OBJS))
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $(OBJDIR)unit_tests $^
-
 $(OBJDIR)%.o: $(SRCDIR)%.cpp
 	$(CXX) $(CXXFLAGS) -c -o $@ $< 
 
