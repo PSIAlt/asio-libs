@@ -59,17 +59,21 @@ void CoroutinePool::CtxHolder(boost::asio::yield_context yield) {
 			handler_queue.pop_front();
 			VERY_DEBUG("CtxHolder %p: running a job", &yield);
 			h(yield); //Let exceptions crash to see bt
+			handlers_processed++;
 		}
 		//Queue is done, wait for next resume or shutdown
 	}
 }
 
-void CoroutinePool::RunQueue() {
+void CoroutinePool::RunQueue(size_t max_num) {
 	VERY_DEBUG("CoroutinePool::RunQueue begin");
+	size_t want_handlers_processed = handlers_processed + max_num;
 	while( !handler_queue.empty() ) {
 		ResumeCoroutine();
 		io.run_one();
 		io.poll();
+		if( want_handlers_processed == handlers_processed )
+			break;
 	}
 	VERY_DEBUG("CoroutinePool::RunQueue end");
 }

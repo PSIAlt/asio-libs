@@ -93,6 +93,28 @@ TEST_CASE( "1 worker; post job from handler", "[coroutine_pool]" ) {
 	REQUIRE( counter==4 );
 }
 
+TEST_CASE( "Dispatch() test", "[coroutine_pool]" ) {
+	counter = 0;
+	ASIOLibs::CoroutinePool p(io, 3);
+
+	for(int i=0; i<11; i++) {
+		p.Schedule([&](boost::asio::yield_context &y) {
+			counter++;
+			io.post(y);
+			counter++;
+		});
+		p.Dispatch([&](boost::asio::yield_context &y) {
+			counter++;
+			io.post(y);
+			counter++;
+		});
+		REQUIRE( counter == (i+1)*4 );
+	}
+
+	p.RunQueue();
+	REQUIRE( counter==11*4 );
+}
+
 // A setup
 int result=-1;
 void run_tests(boost::asio::yield_context _yield, int argc, char* const argv[]) {
