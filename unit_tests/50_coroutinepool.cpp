@@ -74,16 +74,18 @@ TEST_CASE( "3 worker; 11 jobs; no RunQueue", "[coroutine_pool]" ) {
 	REQUIRE( counter==22 );
 }
 
+void freefunc_test(boost::asio::yield_context &y) {
+	counter++;
+	io.post(y);
+	counter++;
+}
+
 TEST_CASE( "1 worker; post job from handler", "[coroutine_pool]" ) {
 	counter = 0;
 	ASIOLibs::CoroutinePool p(io, 1);
 
 	p.Schedule([&](boost::asio::yield_context &y) {
-		p.Schedule([&](boost::asio::yield_context &y2) {
-			counter++;
-			io.post(y2);
-			counter++;
-		});
+		p.Schedule( boost::bind(freefunc_test, _1) );
 		counter++;
 		io.post(y);
 		counter++;
@@ -98,11 +100,7 @@ TEST_CASE( "Dispatch() test", "[coroutine_pool]" ) {
 	ASIOLibs::CoroutinePool p(io, 3);
 
 	for(int i=0; i<11; i++) {
-		p.Schedule([&](boost::asio::yield_context &y) {
-			counter++;
-			io.post(y);
-			counter++;
-		});
+		p.Schedule(freefunc_test);
 		p.Dispatch([&](boost::asio::yield_context &y) {
 			counter++;
 			io.post(y);
