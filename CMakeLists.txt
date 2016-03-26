@@ -33,8 +33,10 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${COMPILE_OPT_FLAGS}")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 -Wall -Werror -ggdb3")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${COMPILE_OPT_FLAGS}")
 
-#Suppress warning to my mac+clang+boost
+#Suppress warning for my mac+clang+boost
+if (${APPLE})
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-local-typedef")
+endif (${APPLE})
 
 add_library(${PROJECT} STATIC ${SOURCES})
 SET_TARGET_PROPERTIES(${PROJECT} PROPERTIES LINKER_LANGUAGE CXX)
@@ -49,5 +51,6 @@ foreach( testsourcefile ${TEST_SOURCES} )
     # Make sure project lib is linked to each app
     target_link_libraries( ${testname} ${PROJECT} )
     target_link_libraries( ${testname} ${Boost_LIBRARIES} )
-    add_test(NAME ${testname} COMMAND ./${testname})
+    add_test(NAME ${testname} COMMAND ./unit_tests/${testname})
+    set_target_properties(${testname} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/unit_tests")
 endforeach( testsourcefile ${TEST_SOURCES} )
