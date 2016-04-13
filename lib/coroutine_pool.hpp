@@ -5,8 +5,12 @@
 #include <deque>
 #include <set>
 #include <functional>
-#include <boost/asio/io_service.hpp>
+#ifndef ASIOLIBS_USE_CALLBACKED_SPAWN
 #include <boost/asio/spawn.hpp>
+#else
+#include <callbacked_spawn.hpp>
+#endif
+#include <boost/asio/io_service.hpp>
 
 namespace ASIOLibs {
 

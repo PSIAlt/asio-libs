@@ -8,7 +8,11 @@
 #include <vector>
 #include <string>
 #include <functional>
+#ifndef ASIOLIBS_USE_CALLBACKED_SPAWN
 #include <boost/asio/spawn.hpp>
+#else
+#include <callbacked_spawn.hpp>
+#endif
 #include <boost/asio/io_service.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/streambuf.hpp>

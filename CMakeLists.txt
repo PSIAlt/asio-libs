@@ -24,8 +24,6 @@ find_package(Boost 1.56 COMPONENTS system thread coroutine REQUIRED)
 include_directories("lib")
 include_directories(${Boost_INCLUDE_DIRS})
 
-#target_link_libraries(test ${Boost_LIBRARIES})
-
 # Setup build compiler/linker options
 set(COMPILE_OPT_FLAGS "-O2")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wall -Werror -ggdb3")
