@@ -5,7 +5,8 @@
 #include <mutex>
 #include <boost/bind.hpp>
 #include <boost/asio.hpp>
-#include <callbacked_spawn.hpp>
+#include <boost/asio/spawn.hpp>
+#include <yield_helper.hpp>
 
 using namespace std;
 boost::asio::io_service io;
@@ -22,24 +23,28 @@ int nocallback_working = 0;
 
 // Test onYield and onResume
 void callbacks_worker(boost::asio::yield_context yield) {
-	yield.onYield = []() { leave_count++; };
-	yield.onResume = []() { enter_count++; };
+	ASIOLibs::YieldHelper yh(yield);
+	yh.onYield = []() { leave_count++; };
+	yh.onResume = []() { enter_count++; };
 
-	io.post( yield );
-	io.post( yield );
-	io.post( yield );
-	io.post( yield );
-	io.post( yield );
+	io.post( YIELDHELPER );
+	assert( enter_count == 1 );
+	assert( enter_count == leave_count );
+	io.post( YIELDHELPER );
+	io.post( YIELDHELPER );
+	io.post( YIELDHELPER );
+	io.post( YIELDHELPER );
 
 	m1_cond_var.notify_one();
 }
 void callbacks_worker_nocallbacks(boost::asio::yield_context yield) {
+	ASIOLibs::YieldHelper yh(yield);
 	//Check it works without callbacks too
-	io.post( yield );
-	io.post( yield );
-	io.post( yield );
-	io.post( yield );
-	io.post( yield );
+	io.post( YIELDHELPER );
+	io.post( YIELDHELPER );
+	io.post( YIELDHELPER );
+	io.post( YIELDHELPER );
+	io.post( YIELDHELPER );
 
 	nocallback_working=1;
 	m2_cond_var.notify_one();
