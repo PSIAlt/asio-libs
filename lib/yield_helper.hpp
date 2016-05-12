@@ -29,6 +29,9 @@ struct YieldHelper {
 	YieldHelper(boost::asio::yield_context &_yield) : yield(_yield) {
 		currentYieldHelper = this;
 	}
+	~YieldHelper() {
+		currentYieldHelper = nullptr;
+	}
 	std::function< void() > onYield;
 	std::function< void() > onResume;
 
@@ -48,6 +51,7 @@ private:
 
 struct YRHelper { // A proxy object which do callbacks before&after line its used at.
 	YRHelper(YieldHelper *_y) : y(_y) {
+		assert( _y != nullptr );
 		y->beforeYield();
 	}
 
@@ -55,7 +59,7 @@ struct YRHelper { // A proxy object which do callbacks before&after line its use
 		y->afterResume();
 	} 
 
-	operator boost::asio::yield_context() const {
+	operator boost::asio::yield_context&() const {
 		return y->yield;
 	}
 private:
@@ -65,7 +69,7 @@ private:
 
 };
 
-#define YIELDHELPER static_cast<boost::asio::yield_context>( ASIOLibs::YRHelper(ASIOLibs::currentYieldHelper) )
+#define YIELDHELPER static_cast<boost::asio::yield_context&>( ASIOLibs::YRHelper(ASIOLibs::currentYieldHelper) )
 
 
 #endif
