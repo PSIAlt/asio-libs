@@ -20,11 +20,11 @@ std::string bin2hex(const std::string &in) {
 	return out;
 }
 
-std::string hex2bin(const std::string &in) {
+Optional<std::string> hex2bin(const std::string &in) {
 	std::string out;
 
 	if( in.size()%2 != 0 )
-		throw std::runtime_error("hex2bin: invalid input");
+		return Optional<std::string>();
 
 	out.resize( in.size()/2 );
 
@@ -38,13 +38,13 @@ std::string hex2bin(const std::string &in) {
 		else if( c >= 'a' && c <= 'f' )
 			out[l] |= (c-'a'+10) << s;
 		else
-			throw std::runtime_error("hex2bin: invalid input");
+			return Optional<std::string>();
 		if( s == 0 )
 			l++;
 		s = (s == 4 ? 0 : 4);
 	}
 
-	return out;
+	return Optional<std::string>( std::move(out) );
 }
 
 std::string string_sprintf(const char *fmt, ...) {

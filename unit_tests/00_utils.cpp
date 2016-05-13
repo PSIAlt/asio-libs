@@ -30,7 +30,7 @@ TEST_CASE( "bin2hex & hex2bin", "[utils]" ) {
 	srand( getpid() ^ time(NULL) );
 	enum { test_sz=100 };
 	std::string bin;
-	std::string bin2;
+	Optional<std::string> bin2;
 	std::string hex;
 	for(int l=0; l<10; l++)	{
 		bin.resize(test_sz);
@@ -39,8 +39,12 @@ TEST_CASE( "bin2hex & hex2bin", "[utils]" ) {
 		}
 		hex = bin2hex(bin);
 		bin2 = hex2bin(hex);
-		REQUIRE( bin == bin2 );
+		REQUIRE( bin2.hasValue() == true );
+		REQUIRE( bin == *bin2 );
 	}
+
+	bin2 = hex2bin("xx");
+	REQUIRE( bin2.hasValue() == false );
 }
 
 TEST_CASE( "ForceFree", "[utils]" ) {

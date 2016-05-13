@@ -9,7 +9,7 @@
 
 namespace ASIOLibs {
 
-#define ASIOLIBS_VERSION "1.0"
+#define ASIOLIBS_VERSION "1.1"
 
 struct ScopeGuard {
 	typedef std::function< void() > func_type;
@@ -30,9 +30,6 @@ private:
 	func_type func;
 	bool isReleased;
 };
-
-std::string bin2hex(const std::string &in);
-std::string hex2bin(const std::string &in);
 
 template<typename T>
 void ForceFree(T &obj) {
@@ -77,6 +74,7 @@ struct Optional {
 	Optional(Optional &&other) = default;
 	Optional(const Optional &other) = default;
 	Optional & operator=(const Optional &other) = default;
+	Optional & operator=(Optional &&other) = default;
 
 	T &operator*() {
 		if( !has_value )
@@ -91,6 +89,10 @@ private:
 };
 
 std::string string_sprintf(const char *fmt, ...);
+std::string bin2hex(const std::string &in);
+Optional<std::string> hex2bin(const std::string &in);
+
+
 
 };
 
