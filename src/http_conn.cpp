@@ -342,22 +342,23 @@ void Conn::StreamReadData( std::unique_ptr< Response > &resp, std::function< siz
 				if( consume_len==0 ) disable_callback=true;
 			}
 			resp->read_buf.consume(consume_len);
+
+			if( consume_len < len )
+				continue; // Finish writing this chunk
 		}
 		if( unlikely(disable_callback && disable_drain) )
 			return; //Leave socket unread
 		if( likely(resp->ReadLeft > 0) ) {
-			while( resp->ReadLeft > 0 ) {
-				size_t rd=0;
-				{
-					TIMEOUT_START( read_timeout );
-					TIMING_STAT_START("http_read");
-					rd = boost::asio::async_read(sock, resp->read_buf,
-						boost::asio::transfer_exactly(resp->ReadLeft>max_read_transfer ? max_read_transfer : resp->ReadLeft), yield[error_code]);
-					TIMING_STAT_END();
-					TIMEOUT_END();
-				}
-				resp->ReadLeft -= rd;
+			size_t rd=0;
+			{
+				TIMEOUT_START( read_timeout );
+				TIMING_STAT_START("http_read");
+				rd = boost::asio::async_read(sock, resp->read_buf,
+					boost::asio::transfer_exactly(resp->ReadLeft>max_read_transfer ? max_read_transfer : resp->ReadLeft), yield[error_code]);
+				TIMING_STAT_END();
+				TIMEOUT_END();
 			}
+			resp->ReadLeft -= rd;
 		}else{
 			interrupt = true;
 		}
