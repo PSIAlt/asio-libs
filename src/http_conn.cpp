@@ -343,11 +343,11 @@ void Conn::StreamReadData( std::unique_ptr< Response > &resp, std::function< siz
 			}
 			resp->read_buf.consume(consume_len);
 
+			if( unlikely(disable_callback && disable_drain) )
+				return; //Leave socket unread
 			if( consume_len < len )
 				continue; // Finish writing this chunk
 		}
-		if( unlikely(disable_callback && disable_drain) )
-			return; //Leave socket unread
 		if( likely(resp->ReadLeft > 0) ) {
 			size_t rd=0;
 			{
@@ -375,23 +375,45 @@ void Conn::StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip:
 		boost::asio::async_write(dest, resp->read_buf, yield);
 		TIMING_STAT_END();
 	}
-	while( resp->ReadLeft > 0 ) {
-		ssize_t rd = splice( sock.native_handle(), NULL, dest.native_handle(), NULL, resp->ReadLeft, SPLICE_F_MOVE | SPLICE_F_NONBLOCK | SPLICE_F_MORE);
-		if( unlikely(rd == -1 && errno != EAGAIN) )
-			throw Error(std::string("splice() failed: ") + strerror(errno), this, Error::ErrorTypes::T_EXCEPTION);
-		else if( rd < 1 ) {
-			{
+	if( resp->ReadLeft > 0 ) {
+		int pipefd[2];
+		if ( pipe(pipefd) < 0 )
+			throw Error(std::string("pipe() failed: ") + strerror(errno), this, Error::ErrorTypes::T_EXCEPTION);
+		ASIOLibs::ScopeGuard _close_guard( [&]{
+			::close(pipefd[0]);
+			::close(pipefd[1]);
+		});
+
+		while( resp->ReadLeft > 0 ) {
+			//Move to pipe
+			ssize_t rd = splice( sock.native_handle(), NULL, pipefd[1], NULL, resp->ReadLeft, SPLICE_F_MOVE | SPLICE_F_NONBLOCK | SPLICE_F_MORE);
+			if( unlikely(rd == -1 && errno != EAGAIN) )
+				throw Error(std::string("splice() #1 failed: ") + strerror(errno), this, Error::ErrorTypes::T_EXCEPTION);
+			else if( rd < 1 ) {
 				TIMEOUT_START( read_timeout );
 				TIMING_STAT_START("http_read");
 				boost::asio::async_read(sock, boost::asio::null_buffers(), yield[error_code]); //Have somthing to read
 				TIMING_STAT_END();
 				TIMEOUT_END();
+				continue;
 			}
-			TIMING_STAT_START("client_write");
-			boost::asio::async_write(dest, boost::asio::null_buffers(), yield); //Can write
-			TIMING_STAT_END();
-		} else
 			resp->ReadLeft -= rd;
+
+
+			//Move from pipe
+			while( rd > 0 ) {
+				ssize_t wr = splice( pipefd[0], NULL, dest.native_handle(), NULL, rd, SPLICE_F_MOVE | SPLICE_F_NONBLOCK | SPLICE_F_MORE);
+				if( unlikely(wr == -1 && errno != EAGAIN) )
+					throw Error(std::string("splice() #2 failed: ") + strerror(errno), this, Error::ErrorTypes::T_EXCEPTION);
+				else if( wr < 1 ) {
+					TIMING_STAT_START("client_write");
+					boost::asio::async_read(dest, boost::asio::null_buffers(), yield); //Have somthing to write
+					TIMING_STAT_END();
+					continue;
+				}
+				rd -= wr;
+			}
+		}
 	}
 #endif
 }
