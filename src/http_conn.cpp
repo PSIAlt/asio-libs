@@ -1,5 +1,7 @@
 #include <iostream>
 #include <algorithm>
+#include <stdexcept>
+#include <system_error>
 #include <boost/asio.hpp>
 #include <boost/bind.hpp>
 #include <fcntl.h>
@@ -387,9 +389,10 @@ void Conn::StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip:
 		while( resp->ReadLeft > 0 ) {
 			//Move to pipe
 			ssize_t rd = splice( sock.native_handle(), NULL, pipefd[1], NULL, resp->ReadLeft, SPLICE_F_MOVE | SPLICE_F_NONBLOCK | SPLICE_F_MORE);
-			if( unlikely(rd == -1 && errno != EAGAIN) )
-				throw Error(std::string("splice() #1 failed: ") + strerror(errno), this, Error::ErrorTypes::T_EXCEPTION);
-			else if( rd < 1 ) {
+			if( unlikely( rd <= 0) ) {
+				if( rd<0 && errno != EAGAIN && errno != EINTR )
+					throw Error(std::string("splice() #1 failed: ") + strerror(errno), this, Error::ErrorTypes::T_EXCEPTION);
+
 				TIMEOUT_START( read_timeout );
 				TIMING_STAT_START("http_read");
 				boost::asio::async_read(sock, boost::asio::null_buffers(), yield[error_code]); //Have somthing to read
@@ -402,13 +405,17 @@ void Conn::StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip:
 
 			//Move from pipe
 			while( rd > 0 ) {
+				TIMING_STAT_START("client_write");
+				boost::asio::async_write(dest, boost::asio::null_buffers(), yield); //Can write
+				TIMING_STAT_END();
+
 				ssize_t wr = splice( pipefd[0], NULL, dest.native_handle(), NULL, rd, SPLICE_F_MOVE | SPLICE_F_NONBLOCK | SPLICE_F_MORE);
-				if( unlikely(wr == -1 && errno != EAGAIN) )
-					throw Error(std::string("splice() #2 failed: ") + strerror(errno), this, Error::ErrorTypes::T_EXCEPTION);
-				else if( wr < 1 ) {
-					TIMING_STAT_START("client_write");
-					boost::asio::async_write(dest, boost::asio::null_buffers(), yield); //Have somthing to write
-					TIMING_STAT_END();
+				if( unlikely( wr <= 0) ) {
+					// Throw exceptions to indicate client error, not backend.
+					if( wr<0 && errno != EINTR )
+						throw std::system_error(errno, std::system_category(), "splice() #2 failed");
+					else if( wr==0 )
+						throw std::system_error(0, std::system_category(), "splice() #2 failed: wr==0");
 					continue;
 				}
 				rd -= wr;
