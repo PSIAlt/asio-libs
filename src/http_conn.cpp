@@ -407,7 +407,7 @@ void Conn::StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip:
 					throw Error(std::string("splice() #2 failed: ") + strerror(errno), this, Error::ErrorTypes::T_EXCEPTION);
 				else if( wr < 1 ) {
 					TIMING_STAT_START("client_write");
-					boost::asio::async_read(dest, boost::asio::null_buffers(), yield); //Have somthing to write
+					boost::asio::async_write(dest, boost::asio::null_buffers(), yield); //Have somthing to write
 					TIMING_STAT_END();
 					continue;
 				}
