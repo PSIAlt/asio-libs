@@ -373,6 +373,7 @@ void Conn::StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip:
 	abort();
 #else
 	if( resp->read_buf.size() ) {
+		//fprintf(stderr, "Write %zu bytes before splice\n", resp->read_buf.size());
 		TIMING_STAT_START("client_write");
 		boost::asio::async_write(dest, resp->read_buf, yield);
 		TIMING_STAT_END();
@@ -386,42 +387,66 @@ void Conn::StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip:
 			::close(pipefd[1]);
 		});
 
+		enum {
+			SPLICE_FULL_HINT = 16*1448, //From haproxy src: A pipe contains 16 segments max, and it's common to see segments of 1448 bytes
+			MAX_SPLICE_AT_ONCE = 1<<30
+		};
+		size_t rd_pipe=0; //Bytes pipe contains atm
 		while( resp->ReadLeft > 0 ) {
 			//Move to pipe
-			ssize_t rd = splice( sock.native_handle(), NULL, pipefd[1], NULL, resp->ReadLeft, SPLICE_F_MOVE | SPLICE_F_NONBLOCK | SPLICE_F_MORE);
-			if( unlikely( rd <= 0) ) {
-				if( rd<0 && errno != EAGAIN && errno != EINTR )
-					throw Error(std::string("splice() #1 failed: ") + strerror(errno), this, Error::ErrorTypes::T_EXCEPTION);
+			TIMEOUT_START( read_timeout );
+			TIMING_STAT_START("http_read");
+			sock.async_read_some(boost::asio::null_buffers(), yield[error_code]); //Have somthing to read
+			TIMING_STAT_END();
+			TIMEOUT_END();
 
-				TIMEOUT_START( read_timeout );
-				TIMING_STAT_START("http_read");
-				boost::asio::async_read(sock, boost::asio::null_buffers(), yield[error_code]); //Have somthing to read
-				TIMING_STAT_END();
-				TIMEOUT_END();
-				continue;
+			while( resp->ReadLeft > 0 && rd_pipe < SPLICE_FULL_HINT ) {
+				size_t rd_once = resp->ReadLeft > MAX_SPLICE_AT_ONCE ? MAX_SPLICE_AT_ONCE : resp->ReadLeft;
+				ssize_t rd = splice( sock.native_handle(), NULL, pipefd[1], NULL, rd_once, SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
+				if( unlikely( rd <= 0) ) {
+					if( rd<0 && errno != EAGAIN && errno != EINTR )
+						throw Error(std::string("splice() #1 failed: ") + strerror(errno), this, Error::ErrorTypes::T_EXCEPTION);
+
+					if( rd<0 && errno == EAGAIN ) {
+						// no input in sock or sock closed -- already checked by async_read
+						// or pipe is full
+						//fprintf(stderr, "Splice(read) EAGAIN rd_pipe=%zu\n", rd_pipe);
+						break;
+					}
+					continue;
+				}
+				rd_pipe += rd;
+				resp->ReadLeft -= rd;
 			}
-			resp->ReadLeft -= rd;
+			//fprintf(stderr, "Spliced(read) %zd bytes\n", rd_pipe);
 
 
 			//Move from pipe
-			while( rd > 0 ) {
+			while( rd_pipe > 0 ) {
 				TIMING_STAT_START("client_write");
-				boost::asio::async_write(dest, boost::asio::null_buffers(), yield); //Can write
+				dest.async_write_some(boost::asio::null_buffers(), yield); //Can write
 				TIMING_STAT_END();
 
-				ssize_t wr = splice( pipefd[0], NULL, dest.native_handle(), NULL, rd, SPLICE_F_MOVE | SPLICE_F_NONBLOCK | SPLICE_F_MORE);
+				ssize_t wr = splice( pipefd[0], NULL, dest.native_handle(), NULL, rd_pipe, SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
 				if( unlikely( wr <= 0) ) {
 					// Throw exceptions to indicate client error, not backend.
-					if( wr<0 && errno != EINTR )
+					if( wr<0 && errno == EAGAIN ) {
+						//fprintf(stderr, "Splice(write) EAGAIN\n");
+						if( rd_pipe < resp->ReadLeft )
+							break; //Exit write loop & read next data to pipe
+						continue;
+					} else if( wr<0 && errno != EINTR )
 						throw std::system_error(errno, std::system_category(), "splice() #2 failed");
 					else if( wr==0 )
 						throw std::system_error(0, std::system_category(), "splice() #2 failed: wr==0");
 					continue;
 				}
-				rd -= wr;
+				//fprintf(stderr, "Spliced(write) %zd bytes\n", wr);
+				rd_pipe -= wr;
 			}
-		}
-	}
+		} //while( resp->ReadLeft > 0 )
+		assert( rd_pipe==0 );
+	}//if( resp->ReadLeft > 0 )
 #endif
 }
 
