@@ -29,6 +29,7 @@ extern "C" {
 	});
 
 #define TIMEOUT_END() checkTimeout(error_code);
+#define TIMEOUT_END_NOTHROW() checkTimeout(error_code, false);
 
 #define TIMING_STAT_START(name) \
 	{ \
@@ -88,7 +89,7 @@ void Conn::checkConnect() {
 			TIMING_STAT_END();
 			TIMEOUT_END();
 		}
-		sock.set_option( boost::asio::ip::tcp::no_delay(true) );
+		//sock.set_option( boost::asio::ip::tcp::no_delay(true) );
 		conn_count++;
 		must_reconnect=false;
 	}
@@ -122,10 +123,16 @@ void Conn::onTimeout(const boost::system::error_code &ec, std::shared_ptr<boost:
 	if( likely(!ec && IS_TIMER_TIMEOUT(timer_)) )
 		close();
 }
-void Conn::checkTimeout(const boost::system::error_code &ec) {
+void Conn::checkTimeout(const boost::system::error_code &ec, bool throw_other_errors) {
 	if( unlikely(ec) ) {
-		if( !IS_TIMER_TIMEOUT(timer) && ec != boost::asio::error::operation_aborted )
-			throw Error(boost::system::system_error(ec).what(), this, Error::ErrorTypes::T_EXCEPTION);
+		if( !IS_TIMER_TIMEOUT(timer) && ec != boost::asio::error::operation_aborted ) {
+			if( throw_other_errors )
+				throw Error(boost::system::system_error(ec).what(), this, Error::ErrorTypes::T_EXCEPTION);
+			else {
+				setupTimeout(0);
+				return;
+			}
+		}
 		close();
 		throw Error( "ASIOLibs::HTTP::Conn: Timeout", this, Error::ErrorTypes::T_TIMEOUT );
 	}
@@ -175,31 +182,41 @@ std::unique_ptr< Response > Conn::DoPostRequest(const char *cmd, const std::stri
 
 	int try_count = 0;
 	boost::system::error_code error_code;
-	cork_set( sock.native_handle() );
-	while( try_count++ < max_send_try ) {
-		checkConnect();
-		writeRequest( req.data(), req.size(), false );
-		bool is_done = false;
-		while( !is_done ) {
-			const char *postdata;
-			size_t postlen;
-			is_done = getDataCallback(&postdata, &postlen);
-			if( postdata == NULL )
-				ReadAnswer(true);
-			TIMING_STAT_START("http_write");
-			boost::asio::async_write(sock, boost::asio::buffer(postdata, postlen), yield[error_code]);
-			TIMING_STAT_END();
-			if( unlikely(!can_recall && error_code) )
+
+	{
+		cork_set( sock.native_handle() );
+		ASIOLibs::ScopeGuard _cork_sg([&]() {
+			cork_clear( sock.native_handle() );
+		});
+		while( try_count++ < max_send_try ) {
+			checkConnect();
+			writeRequest( req.data(), req.size(), false );
+			bool is_done = false;
+			while( !is_done ) {
+				const char *postdata;
+				size_t postlen;
+				is_done = getDataCallback(&postdata, &postlen);
+				if( postdata == NULL )
+					ReadAnswer(true);
+				setupTimeout( read_timeout );
+				TIMING_STAT_START("http_write");
+				boost::asio::async_write(sock, boost::asio::buffer(postdata, postlen), yield[error_code]);
+				TIMING_STAT_END();
+				TIMEOUT_END_NOTHROW();
+				if( unlikely(!can_recall && error_code) )
+					throw Error(boost::system::system_error(error_code).what(), this, Error::ErrorTypes::T_EXCEPTION);
+				if( unlikely(error_code) )
+					break;
+			}
+			if( unlikely(error_code == boost::asio::error::operation_aborted) )
 				throw Error(boost::system::system_error(error_code).what(), this, Error::ErrorTypes::T_EXCEPTION);
-			if( unlikely(error_code) )
-				break;
+			if( likely(!error_code) ) {
+				_cork_sg.Forget();
+				return ReadAnswer(true);
+			}
+			if( unlikely(sock.is_open()) ) //Dunno wtf happend, just reconnect
+				reconnect();
 		}
-		if( unlikely(error_code == boost::asio::error::operation_aborted) )
-			throw Error(boost::system::system_error(error_code).what(), this, Error::ErrorTypes::T_EXCEPTION);
-		if( likely(!error_code) )
-			return ReadAnswer(true);
-		if( unlikely(sock.is_open()) ) //Dunno wtf happend, just reconnect
-			reconnect();
 	}
 	throw Error(boost::system::system_error(error_code).what(), this, Error::ErrorTypes::T_EXCEPTION);
 }
@@ -219,14 +236,16 @@ void Conn::writeRequest(const char *buf, size_t sz, bool wait_read) {
 	DEBUG( "writeRequest " << std::string(buf, sz) );
 	while( try_count++ < max_send_try ) {
 		checkConnect();
+		setupTimeout( read_timeout );
 		TIMING_STAT_START("http_write");
 		boost::asio::async_write(sock, boost::asio::buffer(buf, sz), yield[error_code]);
 		TIMING_STAT_END();
+		TIMEOUT_END_NOTHROW();
 		if( likely(!error_code) ) {
 			if( wait_read ) {
 				setupTimeout( read_timeout );
 				TIMING_STAT_START("http_read");
-				boost::asio::async_read(sock, boost::asio::null_buffers(), yield[error_code]);
+				sock.async_read_some(boost::asio::null_buffers(), yield[error_code]);
 				TIMING_STAT_END();
 				TIMEOUT_END();
 			}
@@ -245,7 +264,7 @@ std::unique_ptr< Response > Conn::ReadAnswer(bool read_body) {
 	ret->ContentLength = -1;
 	ret->ReadLeft = 0;
 
-	cork_clear( sock.native_handle() );
+	cork_clear( sock.native_handle() ); //Flush request if tcp_cork is set
 	{
 		TIMEOUT_START( read_timeout );
 		TIMING_STAT_START("http_read");
@@ -454,7 +473,6 @@ bool Conn::WriteRequestHeaders(const char *cmd, const std::string &uri, size_t C
 	headersCacheCheck();
 	std::string req = ASIOLibs::string_sprintf("%s %s HTTP/1.1\nContent-Length: %zu\n%s",
 		cmd, uri.c_str(), ContentLength, headers_cache.c_str());
-	cork_set( sock.native_handle() );
 	writeRequest( req.data(), req.size(), false );
 	return true;
 } catch (std::exception &e) {
@@ -464,9 +482,11 @@ bool Conn::WriteRequestHeaders(const char *cmd, const std::string &uri, size_t C
 
 bool Conn::WriteRequestData(const void *buf, size_t len) try {
 	size_t wr=0;
+	TIMEOUT_START( read_timeout );
 	TIMING_STAT_START("http_write");
-	wr = boost::asio::async_write(sock, boost::asio::buffer(buf, len), yield);
+	wr = boost::asio::async_write(sock, boost::asio::buffer(buf, len), yield[error_code]);
 	TIMING_STAT_END();
+	TIMEOUT_END();
 	assert( wr == len );
 	return true;
 } catch (std::exception &e) {
@@ -482,12 +502,12 @@ size_t Conn::WriteTee(boost::asio::ip::tcp::socket &sock_from, size_t max_bytes)
 	{
 		TIMEOUT_START( read_timeout );
 		TIMING_STAT_START("http_write");
-		boost::asio::async_read(sock, boost::asio::null_buffers(), yield[error_code]); //Have somthing to read
+		sock.async_write_some(boost::asio::null_buffers(), yield[error_code]); //Have somthing to write
 		TIMING_STAT_END();
 		TIMEOUT_END();
 	}
 	TIMING_STAT_START("client_read");
-	boost::asio::async_write(sock_from, boost::asio::null_buffers(), yield); //Can write
+	sock_from.async_read_some(boost::asio::null_buffers(), yield); //Can read
 	TIMING_STAT_END();
 	ssize_t wr = tee(sock_from.native_handle(), sock.native_handle(), max_bytes, SPLICE_F_MORE | SPLICE_F_NONBLOCK);
 	if( unlikely(wr == -1) )
@@ -510,12 +530,12 @@ size_t Conn::WriteSplice(boost::asio::ip::tcp::socket &sock_from, size_t max_byt
 			{
 				TIMEOUT_START( read_timeout );
 				TIMING_STAT_START("http_write");
-				boost::asio::async_read(sock, boost::asio::null_buffers(), yield[error_code]); //Have somthing to read
+				sock.async_write_some(boost::asio::null_buffers(), yield[error_code]); //Have somthing to write
 				TIMING_STAT_END();
 				TIMEOUT_END();
 			}
 			TIMING_STAT_START("client_read");
-			boost::asio::async_write(sock_from, boost::asio::null_buffers(), yield); //Can write
+			sock_from.async_read_some(boost::asio::null_buffers(), yield); //Can read
 			TIMING_STAT_END();
 		} else
 			wr_total += wr;

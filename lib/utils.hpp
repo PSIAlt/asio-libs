@@ -9,7 +9,7 @@
 
 namespace ASIOLibs {
 
-#define ASIOLIBS_VERSION "1.1"
+#define ASIOLIBS_VERSION "1.2"
 
 struct ScopeGuard {
 	typedef std::function< void() > func_type;

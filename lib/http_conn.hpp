@@ -111,7 +111,7 @@ struct Conn {
 private:
 	void setupTimeout(long milliseconds);
 	void onTimeout(const boost::system::error_code &ec, std::shared_ptr<boost::asio::deadline_timer> timer_);
-	void checkTimeout(const boost::system::error_code &ec);
+	void checkTimeout(const boost::system::error_code &ec, bool throw_other_errors = true);
 
 	void writeRequest(const char *buf, size_t sz, bool wait_read );
 
