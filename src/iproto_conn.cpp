@@ -214,6 +214,8 @@ bool Conn::Write(Packet &&pkt, callbacks_func_type &&cb) {
 	timer->expires_from_now( boost::posix_time::milliseconds(read_timeout) );
 	timer->async_wait( boost::bind(&Conn::onTimeout, shared_from_this(), boost::asio::placeholders::error, pkt.hdr.sync, timer) );
 
+	if( LOG_DEBUG )
+		log_func("[iproto_conn] %s:%u: sending packet sync=%u", ep.address().to_string().c_str(), ep.port(), pkt.hdr.sync);
 	callbacks_map[pkt.hdr.sync] = std::make_pair(std::move(timer), std::forward<callbacks_func_type>(cb));
 	return dropPacketWrite( std::forward<Packet>(pkt) );
 }

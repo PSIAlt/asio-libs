@@ -1,8 +1,11 @@
+#include <atomic>
 #include <cctype>
 #include "perf.hpp"
 #include "iproto.hpp"
 
 namespace IProto {
+
+std::atomic<uint32_t> packer_seq(1);
 
 Packet::Packet(const PacketPtr *buf) {
 	data = static_cast<char*>( malloc(sizeof(hdr)+buf->hdr.len) );

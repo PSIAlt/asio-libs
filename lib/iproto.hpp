@@ -3,7 +3,6 @@
 #define _ASIO_LIBS_IPPROTO_HPP
 #include <assert.h>
 #include <cstring>
-#include <atomic>
 #include <tuple>
 #include <stdexcept>
 #include <string>
@@ -139,7 +138,7 @@ struct PackerImpl< T > {
 	}
 };
 
-static std::atomic<uint32_t> packer_seq(1);
+extern std::atomic<uint32_t> packer_seq;
 template< typename ...Args >
 Packet Packer(uint32_t cmd, uint32_t flags, const Args&... args) {
 	Packet pkt( {cmd, packer_seq++} );

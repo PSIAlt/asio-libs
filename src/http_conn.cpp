@@ -563,7 +563,7 @@ std::string Response::drainRead() const {
 
 const std::string *Response::GetHeader(const std::string &name) {
 	auto it = std::lower_bound(headers.begin(), headers.end(), std::make_pair(name, std::string()) );
-	if( likely(it->first == name) )
+	if( likely(it != headers.end() && it->first == name) )
 		return &it->second;
 	return nullptr;
 }
