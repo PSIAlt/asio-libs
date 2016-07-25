@@ -81,7 +81,13 @@ struct Optional {
 			throw std::runtime_error("Optional has no value");
 		return value;
 	}
+	T *operator->() {
+		if( !has_value )
+			throw std::runtime_error("Optional has no value");
+		return &value;
+	}
 	bool hasValue() const { return has_value; }
+	operator bool() const { return has_value; }
 
 private:
 	T value;

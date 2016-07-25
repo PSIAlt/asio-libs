@@ -87,6 +87,17 @@ void PackerSetValue< char * >::operator()(Packet &pkt, uint32_t flags, char * co
 	memcpy(pkt.data+pkt.hdr.len, val, sz);
 	pkt.hdr.len += sz;
 }
+template<> //instantiate for const char*
+void PackerSetValue< const char * >::operator()(Packet &pkt, uint32_t flags, const char * const &val) {
+	uint32_t sz = strlen(val);
+	PackerSetValue<uint32_t>()(pkt, flags, sz);
+	if( (pkt.hdr.len+sz) > pkt.ofs ) {
+		pkt.ofs = pkt.ofs*2 + sz;
+		pkt.data = static_cast<char*>( realloc(pkt.data, pkt.ofs) );
+	}
+	memcpy(pkt.data+pkt.hdr.len, val, sz);
+	pkt.hdr.len += sz;
+}
 template<> //instantiate for ByteBuffer
 void PackerSetValue<ByteBuffer>::operator()(Packet &pkt, uint32_t flags, const ByteBuffer &val) {
 	uint32_t sz = val.size;
