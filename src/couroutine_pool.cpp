@@ -46,12 +46,12 @@ void CoroutinePool::CtxHolder(boost::asio::yield_context yield) {
 		if( handler_queue.empty() ) {
 			free_ctx.insert( &yield ); //Add pointer so ResumeCoroutine can resume us
 			VERY_DEBUG("CtxHolder %p: going to sleep", &yield);
-			auto coro = yield.coro_.lock(); //Prevent coroutine from forced_unwind since we have no active coro_handler actually
+			volatile auto coro = yield.coro_.lock(); //Prevent coroutine from forced_unwind since we have no active coro_handler actually
 			yield.ca_(); //Yield coroutine
 			VERY_DEBUG("CtxHolder %p: resumed", &yield);
 		}
 
-		// Awaken, now check for job
+		// Awoken, now check for job
 		
 		if( shutdown ) break;
 		while( !handler_queue.empty() ) {

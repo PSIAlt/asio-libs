@@ -21,7 +21,7 @@ public:
 protected:
 	boost::asio::ip::udp::endpoint ep;
 	boost::asio::ip::udp::socket sock;
-	const char *prefix;
+	std::string prefix;
 };
 
 };

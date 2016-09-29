@@ -13,10 +13,10 @@ Graphite::~Graphite() {
 }
 
 bool Graphite::writeStat(const char *name, value_type value) {
-	size_t buf_sz = 15/*prefix*/ + 40/*name*/ + 10/*timestamp*/ + 4/*space,rn*/ + 10/*value*/;
-	boost::shared_array< char > buf( new char[buf_sz]  );
-	int wr = snprintf(buf.get(), buf_sz, "%s.%s %li %li\r\n", prefix, name, value, static_cast<long int>(time(NULL)) ); //TODO optimize out time()
-	assert( wr>0 );
+	int buf_sz = 15/*prefix*/ + 40/*name*/ + 10/*timestamp*/ + 4/*space,rn*/ + 10/*value*/;
+	boost::shared_array< char > buf( new char[buf_sz+1]  );
+	int wr = snprintf(buf.get(), buf_sz, "%s.%s %li %li\r\n", prefix.c_str(), name, value, static_cast<long int>(time(NULL)) ); //TODO optimize out time()
+	assert( wr>0 && wr<buf_sz );
 
 	sock.async_send_to(boost::asio::buffer(buf.get(), wr), ep, [buf](const boost::system::error_code &err, const long unsigned int &bytes){
 		//Do nothing

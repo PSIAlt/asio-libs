@@ -11,7 +11,7 @@ namespace ASIOLibs {
 
 struct TimingStat {
 	void Add(const std::string &name, uint64_t mksec);
-	const std::map< std::string, uint64_t > &Stat() const { return total_stat; }
+	std::map< std::string, uint64_t > &Stat() { return total_stat; }
 
 private:
 	std::map< std::string, uint64_t > total_stat;

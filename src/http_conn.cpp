@@ -41,8 +41,7 @@ extern "C" {
 	}
 
 enum {
-	max_send_try = 5,
-	max_read_transfer = 2048
+	max_send_try = 5
 };
 
 static inline void cork_set(int fd) {
@@ -67,7 +66,7 @@ static inline void cork_clear(int fd) {
 }
 
 Conn::Conn(boost::asio::yield_context &_yield, boost::asio::io_service &_io,
-		boost::asio::ip::tcp::endpoint &_ep, long _conn_timeout, long _read_timeout)
+		endpoint_t &_ep, long _conn_timeout, long _read_timeout)
 		: yield(_yield), ep(_ep), sock(_io), timer( std::make_shared<boost::asio::deadline_timer>(_io) ), conn_timeout(_conn_timeout),
 			read_timeout(_read_timeout), conn_count(0), headers_cache_clear(true),
 			must_reconnect(true), stat(nullptr) {
@@ -82,12 +81,16 @@ Conn::~Conn() {
 void Conn::checkConnect() {
 	if( unlikely(!sock.is_open() || must_reconnect) ) {
 		close();
-		{
+		try {
 			TIMEOUT_START( conn_timeout );
 			TIMING_STAT_START("http_connect");
 			sock.async_connect(ep, yield[error_code]);
 			TIMING_STAT_END();
 			TIMEOUT_END();
+		}catch( Error &e ) {
+			if( e.getType() == Error::ErrorTypes::T_TIMEOUT )
+				throw Error( "ASIOLibs::HTTP::Conn: Connect timeout", this, Error::ErrorTypes::T_TIMEOUT );
+			throw;
 		}
 		//sock.set_option( boost::asio::ip::tcp::no_delay(true) );
 		conn_count++;
@@ -386,13 +389,12 @@ void Conn::StreamReadData( std::unique_ptr< Response > &resp, std::function< siz
 	}
 }
 
-void Conn::StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip::tcp::socket &dest ) {
+void Conn::StreamSpliceData( std::unique_ptr< Response > &resp, socket_t &dest ) {
 #ifndef SPLICE_F_MOVE
 	assert( !"Cant call ASIOLibs::HTTP::Conn::StreamSpliceData: splice(2) is linux-only call" );
 	abort();
 #else
 	if( resp->read_buf.size() ) {
-		//fprintf(stderr, "Write %zu bytes before splice\n", resp->read_buf.size());
 		TIMING_STAT_START("client_write");
 		boost::asio::async_write(dest, resp->read_buf, yield);
 		TIMING_STAT_END();
@@ -413,31 +415,31 @@ void Conn::StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip:
 		size_t rd_pipe=0; //Bytes pipe contains atm
 		while( resp->ReadLeft > 0 ) {
 			//Move to pipe
-			TIMEOUT_START( read_timeout );
-			TIMING_STAT_START("http_read");
-			sock.async_read_some(boost::asio::null_buffers(), yield[error_code]); //Have somthing to read
-			TIMING_STAT_END();
-			TIMEOUT_END();
 
 			while( resp->ReadLeft > 0 && rd_pipe < SPLICE_FULL_HINT ) {
+				TIMEOUT_START( read_timeout );
+				TIMING_STAT_START("http_read");
+				sock.async_read_some(boost::asio::null_buffers(), yield[error_code]); //Have somthing to read
+				TIMING_STAT_END();
+				TIMEOUT_END();
+
 				size_t rd_once = resp->ReadLeft > MAX_SPLICE_AT_ONCE ? MAX_SPLICE_AT_ONCE : resp->ReadLeft;
 				ssize_t rd = splice( sock.native_handle(), NULL, pipefd[1], NULL, rd_once, SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
-				if( unlikely( rd <= 0) ) {
+				if( unlikely( rd < 0) ) {
 					if( rd<0 && errno != EAGAIN && errno != EINTR )
 						throw Error(std::string("splice() #1 failed: ") + strerror(errno), this, Error::ErrorTypes::T_EXCEPTION);
 
 					if( rd<0 && errno == EAGAIN ) {
 						// no input in sock or sock closed -- already checked by async_read
 						// or pipe is full
-						//fprintf(stderr, "Splice(read) EAGAIN rd_pipe=%zu\n", rd_pipe);
 						break;
 					}
 					continue;
-				}
+				} else if (unlikely(!rd))
+					throw Error(std::string("splice() #1 failed: EOF"), this, Error::ErrorTypes::T_EXCEPTION);
 				rd_pipe += rd;
 				resp->ReadLeft -= rd;
 			}
-			//fprintf(stderr, "Spliced(read) %zd bytes\n", rd_pipe);
 
 
 			//Move from pipe
@@ -450,7 +452,6 @@ void Conn::StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip:
 				if( unlikely( wr <= 0) ) {
 					// Throw exceptions to indicate client error, not backend.
 					if( wr<0 && errno == EAGAIN ) {
-						//fprintf(stderr, "Splice(write) EAGAIN\n");
 						if( rd_pipe < resp->ReadLeft )
 							break; //Exit write loop & read next data to pipe
 						continue;
@@ -460,7 +461,6 @@ void Conn::StreamSpliceData( std::unique_ptr< Response > &resp, boost::asio::ip:
 						throw std::system_error(0, std::system_category(), "splice() #2 failed: wr==0");
 					continue;
 				}
-				//fprintf(stderr, "Spliced(write) %zd bytes\n", wr);
 				rd_pipe -= wr;
 			}
 		} //while( resp->ReadLeft > 0 )
@@ -494,7 +494,27 @@ bool Conn::WriteRequestData(const void *buf, size_t len) try {
 	throw;
 }
 
-size_t Conn::WriteTee(boost::asio::ip::tcp::socket &sock_from, size_t max_bytes) {
+std::shared_ptr<ASIOLibs::CoroBarrier> Conn::WriteRequestDataBarrier(const void *buf, size_t len) try {
+	auto r = std::make_shared<ASIOLibs::CoroBarrier>(sock.get_io_service(), yield);
+	setupTimeout( read_timeout );
+	auto t = std::make_shared<StopWatch>("http_write", stat);
+
+	r->errorCheck = [this](const boost::system::error_code &ec) -> void {
+		checkTimeout(ec);
+	};
+	auto completion_handler = [this, t, r](const boost::system::error_code &ec, size_t sz) mutable -> void {
+		t.reset();
+		r->done(ec);
+	};
+
+	boost::asio::async_write(sock, boost::asio::buffer(buf, len), completion_handler);
+	return r;
+} catch (std::exception &e) {
+	close();
+	throw;
+}
+
+size_t Conn::WriteTee(socket_t &sock_from, size_t max_bytes) {
 #ifndef SPLICE_F_MOVE
 	assert( !"Cant call ASIOLibs::HTTP::Conn::WriteTee: tee(2) is linux-only call" );
 	abort();
@@ -516,7 +536,7 @@ size_t Conn::WriteTee(boost::asio::ip::tcp::socket &sock_from, size_t max_bytes)
 #endif
 }
 
-size_t Conn::WriteSplice(boost::asio::ip::tcp::socket &sock_from, size_t max_bytes) {
+size_t Conn::WriteSplice(socket_t &sock_from, size_t max_bytes) {
 #ifndef SPLICE_F_MOVE
 	assert( !"Cant call ASIOLibs::HTTP::Conn::WriteSplice: splice(2) is linux-only call" );
 	abort();

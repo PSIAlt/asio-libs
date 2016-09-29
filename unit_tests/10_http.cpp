@@ -6,11 +6,12 @@
 #include <boost/asio/spawn.hpp>
 #include "http_conn.hpp"
 #include "stopwatch.hpp"
+#include <boost/asio/generic/stream_protocol.hpp>
 
 using namespace std;
 boost::asio::io_service io;
 boost::asio::yield_context *yield;
-boost::asio::ip::tcp::endpoint ep;
+ASIOLibs::HTTP::endpoint_t ep;
 
 TEST_CASE( "HTTP GET tests", "[get]" ) {
 	ASIOLibs::HTTP::Conn c( *yield, io, ep );
@@ -220,7 +221,7 @@ int main( int argc, char* const argv[] ) {
 	boost::asio::ip::tcp::resolver resolver(io);
 	boost::asio::ip::tcp::resolver::query query("forsakens.ru", "80");
 	boost::asio::ip::tcp::resolver::iterator iter = resolver.resolve(query);
-	ep = *iter;
+	ep = boost::asio::ip::tcp::endpoint(*iter);
 	boost::asio::spawn( io, boost::bind(run_spawn, _1, argc, argv) );
 	io.run();
 	return result;
