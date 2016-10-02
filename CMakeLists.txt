@@ -33,11 +33,21 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${COMPILE_OPT_FLAGS}")
 
 #Suppress warning for my mac+clang+boost
 if (${APPLE})
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-local-typedef")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-local-typedef -Wno-delete-non-virtual-dtor")
 endif (${APPLE})
+
+#OpenSSL
+if (${APPLE})
+        #Next ugly hack for mac
+        SET(OPENSSL_ROOT_DIR /usr/local/Cellar/openssl/1.0.2d_1/)
+endif()
+find_package(OpenSSL REQUIRED)
+message(STATUS "Found OpenSSL ${OPENSSL_VERSION} INCDIR ${OPENSSL_INCLUDE_DIR} LIBS ${OPENSSL_LIBRARIES}")
+include_directories(${OPENSSL_INCLUDE_DIR})
 
 add_library(${PROJECT} STATIC ${SOURCES})
 SET_TARGET_PROPERTIES(${PROJECT} PROPERTIES LINKER_LANGUAGE CXX)
+target_link_libraries(${PROJECT} ${OPENSSL_LIBRARIES})
 
 foreach( testsourcefile ${TEST_SOURCES} )
     # Simple string replace, to cut off .cpp.
@@ -49,6 +59,7 @@ foreach( testsourcefile ${TEST_SOURCES} )
     # Make sure project lib is linked to each app
     target_link_libraries( ${testname} ${PROJECT} )
     target_link_libraries( ${testname} ${Boost_LIBRARIES} )
+    target_link_libraries( ${testname} ${OPENSSL_LIBRARIES})
     add_test(NAME ${testname} COMMAND ./unit_tests/${testname})
     set_target_properties(${testname} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/unit_tests")
 endforeach( testsourcefile ${TEST_SOURCES} )
