@@ -504,6 +504,7 @@ std::shared_ptr<ASIOLibs::CoroBarrier> Conn::WriteRequestDataBarrier(const void 
 	};
 	auto completion_handler = [this, t, r](const boost::system::error_code &ec, size_t sz) mutable -> void {
 		t.reset();
+		setupTimeout(0);
 		r->done(ec);
 	};
 

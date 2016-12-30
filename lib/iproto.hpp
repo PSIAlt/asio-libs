@@ -75,6 +75,10 @@ struct tuple_invalid : public tuple_missmatch {
 	tuple_invalid(const std::string &err) : tuple_missmatch(err) {};
 };
 
+enum {
+	BER_PACK = 1,
+};
+
 //Unpacker functions
 template<typename T>
 struct UnpackerGetValue { //instantiated in iproto.cpp
@@ -153,6 +157,5 @@ Packet Packer(uint32_t cmd, uint32_t flags, const Args&... args) {
 }
 
 //TODO pack from std::tuple
-
 };
 #endif

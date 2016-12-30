@@ -64,11 +64,31 @@ void PackerSetValue<T>::operator()(Packet &pkt, uint32_t flags, const T &val) {
 	pkt.hdr.len += sizeof(T);
 }
 template struct PackerSetValue< uint32_t >; //instantiate for uint32_t
+template struct PackerSetValue< uint8_t >; //instantiate for uint8_t
+
+static inline void pack_bersize(Packet &pkt, uint32_t flags, uint32_t sz) {
+	if (sz >= (1 << 7)) {
+		if (sz >= (1 << 14)) {
+			if (sz >= (1 << 21)) {
+				if (sz >= (1 << 28))
+					PackerSetValue<uint8_t>()(pkt, flags, (sz >> 28) | 0x80);
+				PackerSetValue<uint8_t>()(pkt, flags, (sz >> 21) | 0x80);
+			}
+			PackerSetValue<uint8_t>()(pkt, flags, (sz >> 14) | 0x80);
+		}
+		PackerSetValue<uint8_t>()(pkt, flags, (sz >> 7) | 0x80);
+	}
+	PackerSetValue<uint8_t>()(pkt, flags, sz & 0x7F);
+}
 
 template<> //instantiate for std::string
 void PackerSetValue<std::string>::operator()(Packet &pkt, uint32_t flags, const std::string &val) {
 	uint32_t sz = val.size();
-	PackerSetValue<uint32_t>()(pkt, flags, sz);
+	if (flags & BER_PACK) {
+		pack_bersize(pkt, flags & ~BER_PACK, sz);
+	} else {
+		PackerSetValue<uint32_t>()(pkt, flags, sz);
+	}
 	if( likely((pkt.hdr.len+sz) > pkt.ofs) ) {
 		pkt.ofs = pkt.ofs*2 + sz;
 		pkt.data = static_cast<char*>( realloc(pkt.data, pkt.ofs) );
@@ -79,7 +99,11 @@ void PackerSetValue<std::string>::operator()(Packet &pkt, uint32_t flags, const 
 template<> //instantiate for const char*
 void PackerSetValue< char * >::operator()(Packet &pkt, uint32_t flags, char * const &val) {
 	uint32_t sz = strlen(val);
-	PackerSetValue<uint32_t>()(pkt, flags, sz);
+	if (flags & BER_PACK) {
+		pack_bersize(pkt, flags & ~BER_PACK, sz);
+	} else {
+		PackerSetValue<uint32_t>()(pkt, flags, sz);
+	}
 	if( (pkt.hdr.len+sz) > pkt.ofs ) {
 		pkt.ofs = pkt.ofs*2 + sz;
 		pkt.data = static_cast<char*>( realloc(pkt.data, pkt.ofs) );
@@ -107,6 +131,7 @@ T UnpackerGetValue<T>::operator()(Packet &pkt, uint32_t flags) {
 	return *reinterpret_cast<T*>( pkt.data + pkt.ofs - sizeof(T) );
 }
 template struct UnpackerGetValue< uint32_t >; //instantiate for uint32_t
+template struct UnpackerGetValue< uint8_t >; //instantiate for uint8_t
 
 template<> //instantiate for std::string
 std::string UnpackerGetValue<std::string>::operator()(Packet &pkt, uint32_t flags) {
@@ -125,6 +150,4 @@ ByteBuffer UnpackerGetValue<ByteBuffer>::operator()(Packet &pkt, uint32_t flags)
 	pkt.ofs += was_len;
 	return ByteBuffer(pkt.data+pkt.ofs-was_len, was_len);
 }
-
-
 };

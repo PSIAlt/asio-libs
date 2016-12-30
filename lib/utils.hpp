@@ -21,6 +21,7 @@ struct ScopeGuard {
 		}catch(...) {};
 	}
 	void Forget() { isReleased=true; }
+	void Replace(func_type _func) { func = _func; }
 
 	//noncopyable
 	ScopeGuard(const ScopeGuard&) = delete;
@@ -52,7 +53,7 @@ public:
 	std::string str() const         { return stream_.str(); }
 	operator std::string () const   { return stream_.str(); }
 
-	enum ConvertToString 
+	enum ConvertToString
 	{
 		to_str
 	};

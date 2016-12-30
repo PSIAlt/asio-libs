@@ -49,6 +49,7 @@ struct Conn : public std::enable_shared_from_this<Conn> {
 	~Conn();
 
 	const boost::asio::ip::tcp::endpoint &get_endpoint() { return ep; }
+	boost::asio::io_service &get_io_service() { return io; }
 	bool dropPacketWrite(Packet &&pkt);
 	bool Write(Packet &&pkt, callbacks_func_type &&cb);
 	void Shutdown();
